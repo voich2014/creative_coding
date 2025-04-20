@@ -1,0 +1,54 @@
+﻿html
+{
+    overflow: hidden;
+}
+
+body
+{
+	overflow: hidden;
+	background-color: black;
+	color: #fff;
+}
+
+*
+{
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	    -ms-user-select: none;
+	        user-select: none;
+}
+
+#fps
+{
+	position:absolute;
+	color: #FFF;
+	bottom:0px;
+	z-index: 100;
+}
+
+#algo
+{
+	position:absolute;
+	color: #FFF;
+	bottom:16px;
+	z-index: 100;
+}
+
+#game-screen 
+{
+	position:absolute;
+}
+
+a
+{
+	position: absolute;
+	right: 0px;
+	bottom: 0px;
+	z-index: 100;
+}
+video
+{
+	position: absolute;
+	z-index: 100;
+}
+

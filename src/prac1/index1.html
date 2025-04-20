@@ -1,0 +1,633 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの練習1(円弧の華)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモでは、JavaScriptで画面を分割するパターンを練習します。
+	
+	練習1では分割パターンを斜めにしてみました。
+	中の図形は、グラデーション円弧を組み合わせたものです。
+	また、CSSでの額装にも挑戦しています。
+	
+	額装の雰囲気は、中山 哲法さん(@tetunori_lego)の
+	「p5.jsで作品を額縁にかざる方法」を参考にさせて頂きました。
+	ありがとうございます！ 額の内側に影を落とすのもポイントですね。
+	https://qiita.com/tetunori_lego/items/bb80ba9ec4ec941428e3
+	
+	Copyright (c) 2021-2025 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+ 	
+ 	The source code is licensed MIT.
+ 	However, the license for content created using this source code is CC BY-NC-SA 4.0.
+ 	http://creativecommons.org/licenses/by-nc-sa/4.0/
+ 	
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.7.0.js"></script>
+<!--<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>-->
+<style type="text/css">
+	
+	body
+	{
+		background-color:#88AAAA;
+	}
+	
+	#game-screen
+	{
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		
+		border: solid #322;
+		background-color: white;
+		box-shadow: inset 5px 5px 10px rgba(0,0,0,0.4);
+		filter: drop-shadow(15px 15px 10px rgba(0, 0, 0,0.4));
+/*		transform: translate(-50%,-50%) rotate(45deg);	*/
+		transform: translate(-50%,-50%);
+	}
+	
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 250;
+let g_game_height   = 250;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+let g_bloom_offscs  = [];		//ブルーム処理用オフスクリーンcanvas
+
+const MORPH_TIME    = 8000;
+const FADE_TIME     = 200;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+
+let g_scale         = g_game_width / 600;
+let g_seed          = 0;
+let g_col           = [];
+let g_col_rnd       = 1;
+let g_col_list      = [];
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 600;
+		g_game_height = 600;
+		g_scale       = 1.0;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+//	screen.style.left = game_x+"px";
+//	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+	
+	//画面の幅に合わせて額縁の幅を比率で決める
+	const bw = (g_game_width * 0.05) | 0;
+	const pw = (g_game_width * 0.10) | 0;
+	screen.style.borderWidth = bw+"px";
+	screen.style.padding     = pw+"px";
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//カラーリストの生成
+	const urls = 
+	[
+		"https://coolors.co/320e3b-e56399-7f96ff-a6cfd5-dbfcff",
+		"https://coolors.co/6e44ff-b892ff-ffc2e2-ff90b3-ef7a85",
+		"https://coolors.co/2364aa-3da5d9-73bfb8-fec601-ea7317",
+		"https://coolors.co/3a2e39-1e555c-f4d8cd-edb183-f15152",
+		"https://coolors.co/7a5c58-8d80ad-99b2dd-9dfff9-64f58d",
+		"https://coolors.co/87bcde-805e73-4e4d5c-2d4654-243b4a",
+		"https://coolors.co/1c7c54-73e2a7-def4c6-1b512d-b1cf5f",
+		"https://coolors.co/54428e-8963ba-afe3c0-90c290-688b58",
+		"https://coolors.co/22162b-451f55-724e91-e54f6d-f8c630",
+		"https://coolors.co/f2f3ae-edd382-fc9e4f-f4442e-020122",
+		
+		"https://coolors.co/ee6055-60d394-aaf683-ffd97d-ff9b85",
+		"https://coolors.co/4effef-73a6ad-9b97b2-d8a7ca-c7b8ea",
+		"https://coolors.co/eae0cc-c9ada1-a0a083-798478-4d6a6d",
+		"https://coolors.co/272932-4d7ea8-828489-9e90a2-b6c2d9",
+		"https://coolors.co/dbd3ad-e0607e-d36060-c2714f-f6c5af",
+		"https://coolors.co/240115-de3c4b-87f5fb-2f131e-cec3c1",
+		"https://coolors.co/f9dbbd-fca17d-da627d-9a348e-0d0628",
+		"https://coolors.co/ffa630-d7e8ba-4da1a9-2e5077-611c35",
+		"https://coolors.co/404e5c-4f6272-b7c3f3-dd7596-cf1259",
+		"https://coolors.co/e55934-d9594c-ce8d66-c3bf6d-b7b868",
+		
+		"https://coolors.co/b2aa8e-0c1b33-7a306c-03b5aa-dbfe87",
+		"https://coolors.co/e2c2c6-b9929f-9c528b-610f7f-2f0147",
+		"https://coolors.co/a6d49f-9cb380-522a27-c73e1d-c59849",
+		"https://coolors.co/e5f9e0-a3f7b5-40c9a2-2f9c95-664147",
+		"https://coolors.co/ff1053-6c6ea0-66c7f4-c1cad6-ffffff",
+		"https://coolors.co/070707-553555-755b69-96c5b0-adf1d2",
+		"https://coolors.co/f3c969-edff86-fff5b2-d4fcc3-362c28",
+		"https://coolors.co/2e294e-efbcd5-be97c6-8661c1-4b5267",
+		"https://coolors.co/d6d9ce-f3dad8-f4c3c2-f1b5cb-e88eed",
+		"https://coolors.co/4a4063-bfacc8-c8c6d7-783f8e-4f1271",
+		
+		"https://coolors.co/2660a4-edf7f6-f19953-c47335-56351e",
+		"https://coolors.co/a6d49f-9cb380-522a27-c73e1d-c59849",
+		"https://coolors.co/b5c2b7-8c93a8-62466b-45364b-2d2327",
+		"https://coolors.co/006ba6-0496ff-ffbc42-d81159-8f2d56",
+		"https://coolors.co/fcde9c-ffa552-ba5624-381d2a-c4d6b0",
+		"https://coolors.co/212738-f97068-d1d646-edf2ef-57c4e5",
+		"https://coolors.co/1f2421-216869-49a078-9cc5a1-dce1de",
+		"https://coolors.co/441151-883677-ca61c3-ee85b5-ff958c",
+		"https://coolors.co/fbba72-ca5310-bb4d00-8f250c-691e06",
+		"https://coolors.co/c6ebbe-a9dbb8-7ca5b8-38369a-020887",
+		
+		"https://coolors.co/764248-dda3b2-ffadc6-e3c5bb-dfe2cf",
+		"https://coolors.co/0a122a-698f3f-fbfaf8-e7decd-804e49",
+		"https://coolors.co/6622cc-a755c2-b07c9e-b59194-d2a1b8",
+		"https://coolors.co/545e75-63adf2-a7cced-304d6d-82a0bc",
+		"https://coolors.co/044389-fcff4b-ffad05-7cafc4-5995ed",
+		"https://coolors.co/bfacaa-02020a-05204a-b497d6-e1e2ef",
+		"https://coolors.co/20bf55-0b4f6c-01baef-fbfbff-757575",
+		"https://coolors.co/2e0219-4a001f-6a0f49-a7c4c2-97efe9",
+		"https://coolors.co/484a47-5c6d70-a37774-e88873-e0ac9d",
+		"https://coolors.co/795c5f-a69658-d9b26f-fadf7f-f2e29f"
+	];
+	g_col_list = [];
+	for(let i = 0;i < urls.length;++i)
+	{
+		g_col_list.push(createPalette(urls[i]));
+	}
+	
+}
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	let scale = 0.5;
+	const num = 1;//2;
+	for(let i = 0;i < num;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = sc_w * scale;
+		const cv_h = sc_h * scale;
+		
+		cv.width  = sc_w * scale;
+		cv.height = sc_h * scale;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(ctx,draw_screen)
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 5,10 ];
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(draw_screen,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+blur_w[idx]+"px)";
+		ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		ctx.restore();
+		
+		//draw_screenが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	reset();
+	
+}
+
+function reset()
+{
+
+	//乱数のシード値を決定
+	g_seed = rnd(1234);
+
+	//標準のパレットを決定
+	g_col = g_col_list[random(0,g_col_list.length-1)|0];
+	
+	//パレットランダムモード選択
+	g_col_rnd = 1;//(random(0,100) < 60) ? 1 : 0;
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+//Sayamaさんのワークショップ資料から引用
+//PCDJapan_WS_Generative Illustrations
+//https://www.openprocessing.org/sketch/1102169
+function separateGrid(x, y, w, h, n, mi,ma)
+{
+	for(let yi = 0; yi < n; yi++)
+	{
+		for(let xi = 0; xi < n; xi++)
+		{
+			const dx = x + w / n * xi;
+			const dy = y + h / n * yi;
+			const dw = w / n;
+			const dh = h / n;
+			const rn = random();
+			const wh = min(dw, dh);
+			if((wh > ma) || (rn < 0.5 && wh > mi)){
+				separateGrid(dx, dy, dw, dh, n, mi, ma);
+			}
+			else{
+				//描画命令
+				drawSuteki(dx,dy,dw,dh);
+			}
+		}
+	}
+}
+
+const TYPE_BOX   = 0;
+const TYPE_ARC   = 1;
+const TYPE_TRI   = 2;
+
+function drawSuteki(x,y,w,h)
+{
+	//素敵なのを描画
+		
+	//パラメータ準備
+	const ctx   = g_screen_ctx;
+	const cx    = x + w / 2;
+	const cy    = y + h / 2;
+	const scale = 0.66;
+	
+	const ow2          = g_game_width / 2;
+	const shadow_scale = w / ow2;
+	
+	const w2    = w / 2;
+	const h2    = h / 2;
+	let palette = shuffle(g_col.slice());
+	let backcol = "#FFF";
+	
+	if(g_col_rnd)
+	{
+		//ランダムパレットモード
+		const pal = shuffle(g_col_list[random(0,g_col_list.length-1)|0].slice());
+		backcol = pal[0];
+		palette = pal.slice(1);
+	}
+	
+	let pos       = [];
+	let pa        = random(0,TAU);
+	const add_pa  = random(2,20) / 10;
+	const pos_num = random(3,5);
+	for(let p = 0;p < pos_num;++p)
+	{
+		const type = TYPE_ARC;
+		
+		let info = {};
+		//if(type == TYPE_ARC)
+		{
+			const sr = w2 * random(20,90) / 100;
+			const r  = w2 * random(10,50) / 100;
+			const rs = rad(random(0,360));
+			const re = rs + rad(random(40,270));
+			const lw = random(3,15) * g_scale;
+			
+			info.type = type;
+			info.x    = sr * scale;
+			info.y    = 0;
+			info.r    = r * scale;
+			info.rs   = rs;
+			info.re   = re;
+			info.lw   = lw;
+			info.a    = pa;
+		}
+		
+		info.col1 = palette[(pos.length + 0) % palette.length];
+		info.col2 = palette[(pos.length + 1) % palette.length];
+		pa += add_pa;
+		
+		const alpha = (random(0,100) < 20) ? (random(60,98) / 100) : 0.98;	//最大100%にせずに、ほんのりしたやわらかさを出してるつもり
+		info.alpha  = alpha;	
+		
+		pos.push(info);
+	}
+
+	ctx.save();
+	
+	if(g_col_rnd)
+	{
+		//ランダムパレットモードは背景色を個別に描画
+		ctx.fillStyle = backcol;
+		ctx.fillRect(x,y,w,h);
+	}
+	
+	ctx.translate(cx,cy);
+	ctx.shadowColor   = 'rgba(0,0,0,0.6)';
+	ctx.shadowOffsetX = 10 * shadow_scale;
+	ctx.shadowOffsetY = 10 * shadow_scale;
+	ctx.shadowBlur    = 25 * shadow_scale;
+	
+	const add_ra = TAU / random(3,7);
+	
+	for(let i = 0;i < pos.length;++i)
+	{
+		const p = pos[i];
+		for(let ra = 0;ra < TAU;ra += add_ra)
+		{
+			const pa    = ra + p.a;
+
+			ctx.save();
+
+			ctx.globalAlpha = p.alpha;
+			ctx.rotate(ra + p.a);
+			ctx.beginPath();
+			
+			//円弧の傾きに合わせてグラデーションを作成
+			const sx  = p.x + p.r * Math.cos(p.rs);
+			const sy  = p.y + p.r * Math.sin(p.rs);
+			const ex  = p.x + p.r * Math.cos(p.re);
+			const ey  = p.y + p.r * Math.sin(p.re);
+			const gra = ctx.createLinearGradient(sx,sy,ex,ey);
+			gra.addColorStop(0.0 ,p.col1);
+		    gra.addColorStop(1.0 ,p.col2);
+		    
+			ctx.strokeStyle = gra;
+			//if(p.type == TYPE_ARC)
+			{
+				ctx.lineWidth = p.lw;
+				ctx.arc(p.x,p.y,p.r,p.rs,p.re);
+				ctx.stroke();
+			}
+			
+			ctx.restore();
+		}
+	}
+	
+	ctx.restore();
+	
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//画面クリア
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const ctx  = g_screen_ctx;
+	//ctx.fillStyle = "#FFF";
+	ctx.fillStyle = "#000";
+	ctx.fillRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+	
+	const scale = 1.4142;
+	const sc_w2 = sc_w / 2;
+	const sc_h2 = sc_h / 2;
+	const div_n = 2;
+	const min_w =  90 * g_scale;
+	const max_w = 280 * g_scale;
+	
+	ctx.translate(sc_w2,sc_h2);
+	ctx.rotate(rad(45));
+	ctx.translate(-sc_w2*scale,-sc_h2*scale);
+	
+	randomSeed(g_seed);	//シードを固定して分割が毎回同じになるようにする
+	separateGrid(0,0,sc_w*scale,sc_h*scale,div_n,min_w,max_w);
+	//drawSuteki(0,0,sc_w,sc_h);
+
+	ctx.restore();
+	
+	//ブルーム処理
+	//let screen = document.getElementById("game-screen");
+	//do_bloom(ctx,screen);
+
+/*	
+	ctx.save();
+	
+	//フェートイン・アウト
+	const time_ms = g_time - g_start_time;
+	if(time_ms < FADE_TIME)
+	{
+		ctx.globalAlpha = 1.0 - (time_ms / FADE_TIME);
+		ctx.fillStyle = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	else if(time_ms >= (MORPH_TIME - FADE_TIME))
+	{
+		ctx.globalAlpha = (time_ms - (MORPH_TIME - FADE_TIME)) / FADE_TIME;
+		ctx.fillStyle = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+
+	ctx.restore();
+*/
+	
+	//色変更時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
