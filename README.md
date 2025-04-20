@@ -1,0 +1,2 @@
+# creative_coding
+主にJavaScriptを用いたジェネラティブアート作品を置いていきます。
