@@ -39,8 +39,8 @@ creative_coding/
 
 > ※準備が整い次第、以下に各作品の公開URLを追加していきます。
 
-- `prac1`：[円弧の華（スクロール版）](https://voich2014.github.io/creative_coding/src/prac1/)
-- `prac5`：[FlowField v2](https://voich2014.github.io/creative_coding/src/prac5/)
+- `prac1`：[円弧の華（スクロール版）](https://voich2014.github.io/creative_coding/src/prac1/index2.html)
+- `prac5`：[FlowField v2](https://voich2014.github.io/creative_coding/src/prac5/index2.html)
 
 ---
 
