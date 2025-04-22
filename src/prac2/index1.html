@@ -1,0 +1,854 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの練習2(光る砂の滝)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモでは、JavaScriptで砂シミュレーションを練習します。
+	
+	練習2ではmikuさん(@BaroqueEngine)のクリエイティブコーディングの教科書の
+	中の「砂遊びシミュレーション」を参考にさせて頂きました。
+	これ面白いですね。ありがとうございます(*´ω｀*)
+	https://zenn.dev/baroqueengine/books/a19140f2d9fc1a/viewer/d01773	
+	
+	額装の雰囲気は、中山 哲法さん(@tetunori_lego)の
+	「p5.jsで作品を額縁にかざる方法」を参考にさせて頂きました。
+	ありがとうございます！ 額の内側に影を落とすのもポイントですね。
+	https://qiita.com/tetunori_lego/items/bb80ba9ec4ec941428e3
+	
+	Copyright (c) 2021 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+ 	
+ 	The source code is licensed MIT.
+ 	However, the license for content created using this source code is CC BY-NC-SA 4.0.
+ 	http://creativecommons.org/licenses/by-nc-sa/4.0/
+ 	
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.7.0.js"></script>
+<!--<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>-->
+<style type="text/css">
+	
+	body
+	{
+		background-color:#DDAA88;
+	}
+	
+	#game-screen
+	{
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		
+		border: solid #322;
+		background-color: white;
+		box-shadow: inset 5px 5px 10px rgba(0,0,0,0.4);
+		filter: drop-shadow(15px 15px 10px rgba(0, 0, 0,0.4));
+		transform: translate(-50%,-50%);
+	}
+	
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width     = 200;
+let g_game_height    = 250;
+
+let g_time           = 0;		//現在時刻[ms]
+let g_dtime          = 0;		//前回の描画からの経過時間[ms]
+
+let g_pn             = new Perlin();
+let g_screen_ctx     = null;
+let g_bloom_offscs   = [];		//ブルーム処理用オフスクリーンcanvas
+
+const MORPH_TIME     = 10000;
+const FADE_TIME      = 200;
+
+const ACCEL_MIN      = 4;
+const ACCEL_MAX      = 24;
+
+let g_sand_num       = 3000;
+let g_create_num_min = 20;
+let g_create_num_max = 40;
+let g_start_cv       = null;
+let g_start_ctx      = null;
+let g_next_cv        = null;
+let g_next_ctx       = null;
+let g_offsc          = null;
+let g_nextsc         = null;
+let g_sand           = [];
+
+let g_start_time     = 0;
+let g_next_time      = 0;
+
+let g_scale          = g_game_width / 480;
+let g_seed           = 0;
+let g_col            = [];
+let g_col_list       = [];
+let g_sand_col       = "";
+let g_sand_collist   = [];
+
+let g_last_fps_time  = 0;
+let g_fps_count      = 0;
+let g_fps            = 60;
+let g_fps_list       = [];
+let g_fps_visible    = true;
+
+let g_cnt            = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width     = 480;
+		g_game_height    = 600;
+		g_scale          = 1.0;
+		g_create_num_min = 50;
+		g_create_num_max = 100;
+		g_sand_num       = 25000;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+//	screen.style.left = game_x+"px";
+//	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+	
+	//画面の幅に合わせて額縁の幅を比率で決める
+	const bw = (g_game_width * 0.05) | 0;
+	const pw = (g_game_width * 0.10) | 0;
+	screen.style.borderWidth = bw+"px";
+	screen.style.padding     = pw+"px";
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//カラーリストの生成
+	const urls = 
+	[
+		//重ねた時に白飛びしない様に、暗すぎず明るすぎない色を選びました
+		"https://coolors.co/515a47-d7be82-7a4419-755c1b-400406",
+		"https://coolors.co/4c061d-d17a22-b4c292-736f4e-3b3923",
+		"https://coolors.co/42c299-289445-0b84b8-11ab9b-41ccf2",
+		"https://coolors.co/1a4c8a-49c4a3-1e1ee3-1a2540-1b64f5",
+		"https://coolors.co/40338f-2a0d73-202b6e-1d2aa1-051a59",
+		"https://coolors.co/6708c7-cf0e65-d15fed-a82567-eb34c3",
+		"https://coolors.co/b08066-ab4d2b-7d8c3f-616126-8a7229",
+		"https://coolors.co/5c1458-4b1757-1f0440-0c085c-561a63",
+		"https://coolors.co/041d61-4c7c91-070854-16389e-053199",
+		"https://coolors.co/857b9c-4d185c-200657-4c3361-580f66",
+
+		"https://coolors.co/0a6d7a-002408-0b97a1-025412-36615b",
+		"https://coolors.co/a82037-30120b-d9770f-613416-de2f2f",
+		"https://coolors.co/480b6e-bdc2db-94839e-676770-0716eb",
+		"https://coolors.co/797a8f-23266b-481b54-7b5185-29379e",
+		"https://coolors.co/727a14-b36f04-755c12-3b4721-8a7117",
+		"https://coolors.co/0b1b40-6c4299-386496-4046a3-160169",
+		"https://coolors.co/034037-1cad40-297d6e-208a38-024d04",
+		"https://coolors.co/284d1b-475408-fab73c-566606-459e00",
+		"https://coolors.co/03331d-316657-30b2e6-073b42-062745",
+		"https://coolors.co/393182-141c7a-5ad6ce-6559d4-3e4e7a",
+
+		"https://coolors.co/24aeb5-196a85-498691-162d7d-20d1f5",
+		"https://coolors.co/a61277-fa6a3e-8a1147-a64c89-b0307d",
+		"https://coolors.co/b451db-7c58ad-241fcc-3946d4-b6a1bf",
+		"https://coolors.co/0f2eab-615aa3-6f7980-8686a3-403f42",
+		"https://coolors.co/1e3ebd-0478d1-a257ff-5b28b8-496cb3",
+		"https://coolors.co/4240a1-1562cf-0a394a-30c3fc-096596",
+		"https://coolors.co/fa6b69-b56464-cf862d-bf3228-e88a17",
+		"https://coolors.co/f74636-eb1781-fa73b2-8a0b20-ab0c36",
+		"https://coolors.co/4d802e-676e64-508033-1a8c18-38d1a1",
+		"https://coolors.co/660b3f-782f62-91503c-e69e39-a1744d",
+
+		"https://coolors.co/5e4527-4a1e01-737a53-abab24-f2b78f",
+		"https://coolors.co/07468f-0b19b8-7d3fd4-2237bd-0456c9",
+		"https://coolors.co/b754de-781462-bd85e6-8f67f5-2c1e85",
+		"https://coolors.co/9805ed-2e61d9-2a34a1-000cf5-5d69a3",
+		"https://coolors.co/4a0d26-a80f63-4a183a-3b2a26-592e1f",
+		"https://coolors.co/072540-586269-3d4145-252529-2e5a63",
+		"https://coolors.co/85371d-f2059f-e08a65-fc42af-8a3b07",
+		"https://coolors.co/68b9d4-99a9f7-0d84d9-05b4ff-347494",
+		"https://coolors.co/2f4cb5-0b459c-9a2fcc-502af7-3300ff",
+		"https://coolors.co/b8335f-5a1173-db5af2-eb0779-e317b7",
+		
+		"https://coolors.co/e0604f-bdab6a-e62e1e-804d40-c7a463",
+		"https://coolors.co/4c5a85-37bfaf-1280e0-68a0b0-2a26f0",
+		"https://coolors.co/fc8c53-a81111-e06363-bd1919-a68779",
+		"https://coolors.co/c2c761-046e06-a0b312-0e782b-398f49",
+		"https://coolors.co/b8c799-998c70-8a632d-b0a792-9c905f",
+		"https://coolors.co/d15c5c-802e11-d17575-f06e6e-f00707",
+		"https://coolors.co/8ca115-ba9d5d-939e15-b5b264-bdd48a",
+		"https://coolors.co/b3ab74-de7e1f-fcb177-e6b61c-997d62",
+		"https://coolors.co/cee61e-c2b60a-5aad11-abc71e-0bbf02",
+		"https://coolors.co/ab851f-8f8129-ed9c1a-53bd22-7b9133",
+		
+		"https://coolors.co/8051a6-ba7b8f-4f196e-c887e0-601782",
+		"https://coolors.co/4d69ab-1a73b8-277ccc-303bc9-71a8f5",
+		"https://coolors.co/53abe6-552fa1-184e73-352ee8-46b7d4",
+		"https://coolors.co/7a0909-8c6911-d6330b-635119-e6de07",
+		"https://coolors.co/8c23a6-6229e6-b82576-b32ffa-cc48cf",
+		"https://coolors.co/410d5e-661c5d-7916ab-7e79a6-ff70ea",
+		"https://coolors.co/6f9139-d6d61a-6a7021-afba0f-7fde0b",
+		"https://coolors.co/a84c53-f20f7d-a81ee8-821245-960299",
+		"https://coolors.co/84aafa-8c5091-3e57b5-063ecc-997bb5",
+		"https://coolors.co/35123b-603dfc-9e006c-1c1191-1d0040",
+		
+		"https://coolors.co/d1581b-c7680a-873b12-faa032-ab0b05",
+		"https://coolors.co/701212-521e1e-52350d-c95349-4d0b0b",
+		"https://coolors.co/720b8c-db74d4-310f8c-8e549e-00096e",
+		"https://coolors.co/5e3925-914d46-b35080-472c32-dea6c5",
+		"https://coolors.co/8c45a8-9a87c7-452394-a157a1-8276b8",
+		"https://coolors.co/19202b-0886bd-1a2a3b-5dc0d4-17bf71",
+		"https://coolors.co/57ab9c-4f84a1-0f7570-1eaffc-10ebe0",
+		"https://coolors.co/5da39c-0386a3-3ee036-8fe397-33ad28",
+		"https://coolors.co/3b28b0-2a0da8-b51680-b74ed4-832099",
+		"https://coolors.co/485dd4-7a32ab-2731e6-5e337d-56b4fc",
+		
+		"https://coolors.co/0e46a1-51a1a8-3c5399-1645de-355fb8",
+		"https://coolors.co/78d620-8fa137-4c630a-3e7d06-c27f4f",
+		"https://coolors.co/0e1b4d-253c59-5c58db-0d2857-6065e6",
+		"https://coolors.co/8c1f5b-2b110e-851755-452115-52141d",
+		"https://coolors.co/7e48bd-858da1-8a2ef2-ac9fc7-965ab0",
+		"https://coolors.co/bf4186-db7967-d13b6f-ed652f-f06c88",
+		"https://coolors.co/3e7b82-254d36-4381de-464747-808a85",
+		"https://coolors.co/2c0cad-3c17d1-096d7d-0552ab-9da8fc",
+		"https://coolors.co/61422e-405725-a5e00d-203b01-917a27",
+		"https://coolors.co/88099e-bfabf5-5c5196-9123eb-afaefc",
+
+		"https://coolors.co/bdac11-7a2816-f02929-d6a400-f01616",
+		"https://coolors.co/9c3b25-d1417f-ba113e-5c3427-ab5584",
+		"https://coolors.co/35704e-469176-549e70-568a43-999e98",
+		"https://coolors.co/dbbb2a-cc2b2b-e64a3c-bd2f2f-f06b18",
+		"https://coolors.co/36241d-3e4224-8a6b1e-33320a-e63737",
+		"https://coolors.co/bd0b7c-9e2074-e639ba-6b45f5-c111d9",
+		"https://coolors.co/74a9cf-babdde-9e9e9e-0a2a8a-2609e0",
+		"https://coolors.co/030a57-042652-500b8c-5232b3-5121b8",
+		"https://coolors.co/641ee6-83188f-7e49c9-a272fc-584cd9",
+		"https://coolors.co/538ead-36d193-1f67cc-3e72ad-32cf88",
+
+		"https://coolors.co/ed1cc0-db94e3-f2c7e1-ed5fdd-8f185b",
+		"https://coolors.co/a102e6-e00b7d-ff12f7-a71eeb-ed15c9",
+		"https://coolors.co/cc7073-ab6388-ab0f48-c92230-5c373f",
+		"https://coolors.co/504deb-9f34ba-324099-0a2f8c-653aa1",
+		"https://coolors.co/7e851e-520e0e-665009-211f08-301505",
+		"https://coolors.co/541111-822e04-473f30-821010-543232",
+		"https://coolors.co/e05cab-fa5a8a-571b16-e87bb9-ff1259",
+		"https://coolors.co/5b445e-8d40bd-6b5f62-70327d-b579b4",
+		"https://coolors.co/992c77-5c1020-7a0d34-852654-db09c6",
+		"https://coolors.co/16f0da-157c8a-179981-12574a-188c7b",
+	];
+	g_col_list = [];
+	for(let i = 0;i < urls.length;++i)
+	{
+		g_col_list.push(createPalette(urls[i]));
+	}
+	
+	const urls2 = 
+	[
+		//光る砂用なので輝度が高めの色を選んでいます
+		"https://coolors.co/f7f4ea-ded9e2-c0b9dd-80a1d4-75c9c8",
+		"https://coolors.co/ff5e5b-d8d8d8-ffffea-00cecb-ffed66",
+		"https://coolors.co/985f99-9684a1-aaacb0-b6c9bb-bfedc1",
+		"https://coolors.co/84dcc6-d6edff-acd7ec-8b95c9-478978",
+		"https://coolors.co/ffc4eb-ffe4fa-f1dedc-e1dabd-abc798",
+		"https://coolors.co/44af69-f8333c-fcab10-2b9eb3-dbd5b5",
+		"https://coolors.co/efd9ce-dec0f1-b79ced-957fef-7161ef",
+		"https://coolors.co/9046cf-cc59d2-f487b6-fff3f0-fde12d",
+		"https://coolors.co/d3ab9e-eac9c1-ebd8d0-fffbff-fefeff",
+		"https://coolors.co/cc5803-e2711d-ff9505-ffb627-ffc971"
+	];
+	g_sand_collist = [];
+	for(let i = 0;i < urls2.length;++i)
+	{
+		g_sand_collist.push(createPalette(urls2[i]));
+	}
+	
+	//障害物図形用のキャンバスを準備
+	g_start_cv  = document.createElement("canvas");
+	g_start_ctx = g_start_cv.getContext("2d");
+	g_next_cv   = document.createElement("canvas");
+	g_next_ctx  = g_next_cv.getContext("2d");
+	
+	g_start_cv.width  = sc_w;
+	g_start_cv.height = sc_h;
+	g_next_cv.width   = sc_w;
+	g_next_cv.height  = sc_h;
+	
+}
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	let scale = 0.5;
+	const num = (g_scale == 1.0) ? 2 : 1;
+	for(let i = 0;i < num;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = sc_w * scale;
+		const cv_h = sc_h * scale;
+		
+		cv.width  = sc_w * scale;
+		cv.height = sc_h * scale;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(ctx,draw_screen)
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 4,12 ];
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(draw_screen,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+blur_w[idx]+"px)";
+		ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		ctx.restore();
+		
+		//draw_screenが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function create_obstacle(cv,ctx)
+{
+	
+	//障害物図形を作成
+	
+	//キャンバスのサイズを取得
+	const cv_w = cv.width;
+	const cv_h = cv.height;
+	
+	//黒で塗りつぶす
+	ctx.fillStyle = "#000";
+	ctx.fillRect(0,0,cv_w,cv_h);
+	
+	//パラメータ準備
+	const w2    = cv_w / 2;
+	const h2    = cv_h / 2;
+	const cx    = w2;
+	const cy    = h2;
+	const scale = 0.65;
+	let palette = shuffle(g_col.slice());
+
+	let pos       = [];
+	let pa        = random(0,TAU);
+	const add_pa  = random(2,20) / 10;
+	const pos_num = random(3,5);
+	for(let p = 0;p < pos_num;++p)
+	{
+		const type = 0;
+		
+		let info = {};
+		{
+			const sr = w2 * random(20,90) / 100;
+			const r  = w2 * random(10,50) / 100;
+			const rs = rad(random(0,360));
+			const re = rs + rad(random(40,270));
+			const lw = random(3,15) * g_scale;
+			
+			info.type = type;
+			info.x    = sr * scale;
+			info.y    = 0;
+			info.r    = r * scale;
+			info.rs   = rs;
+			info.re   = re;
+			info.lw   = lw;
+			info.a    = pa;
+		}
+		
+		info.col1 = palette[(pos.length + 0) % palette.length];
+		info.col2 = palette[(pos.length + 1) % palette.length];
+		pa += add_pa;
+
+		pos.push(info);
+	}
+
+	ctx.save();
+	
+	ctx.translate(cx,cy);
+	const add_ra = TAU / random(3,7);
+	
+	for(let i = 0;i < pos.length;++i)
+	{
+		const p = pos[i];
+		for(let ra = 0;ra < TAU;ra += add_ra)
+		{
+			const pa    = ra + p.a;
+
+			ctx.save();
+
+			ctx.rotate(ra + p.a);
+			ctx.beginPath();
+			
+			//円弧の傾きに合わせてグラデーションを作成
+			const sx  = p.x + p.r * Math.cos(p.rs);
+			const sy  = p.y + p.r * Math.sin(p.rs);
+			const ex  = p.x + p.r * Math.cos(p.re);
+			const ey  = p.y + p.r * Math.sin(p.re);
+			const gra = ctx.createLinearGradient(sx,sy,ex,ey);
+			gra.addColorStop(0.0 ,p.col1);
+		    gra.addColorStop(1.0 ,p.col2);
+		    
+			ctx.strokeStyle = gra;
+			{
+				ctx.lineWidth = p.lw;
+				ctx.arc(p.x,p.y,p.r,p.rs,p.re);
+				ctx.stroke();
+			}
+			
+			ctx.restore();
+		}
+	}
+	
+	ctx.restore();
+
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	//※1回だとstartの値が不定になるのでreset()を2回呼びます
+	reset();
+	create_obstacle(g_next_cv,g_next_ctx);
+	g_nextsc = g_next_ctx.getImageData(0,0,g_start_cv.width,g_start_cv.height);
+	reset();
+
+}
+
+function reset()
+{
+
+	//乱数のシード値を決定
+	g_seed = rnd(1234);
+
+	//標準のパレットを決定
+	g_col = g_col_list[random(0,g_col_list.length-1)|0];
+	
+	//砂の色を決定
+	const pal  = g_sand_collist[random(0,g_sand_collist.length-1)|0];
+	g_sand_col = shuffle(pal.slice())[0];
+	
+	//障害物図形を設定
+	g_start_ctx.drawImage(g_next_cv,0,0);
+	
+	//オフスクリーンデータを更新
+	g_offsc = g_nextsc;
+	setTimeout(function()
+	{
+		//スマホだとgetImageData時にフリーズする場合があるので遅延実行
+		create_obstacle(g_next_cv,g_next_ctx);
+		g_nextsc = g_next_ctx.getImageData(0,0,g_start_cv.width,g_start_cv.height);
+		
+	},10);
+	
+	//砂情報をリセット
+	g_sand = [];
+	for(let i = 0;i < g_sand_num;++i)
+	{
+		const info =
+		{
+			x: 0, y: 0, v: 1, a: 0,
+			free: true
+		};
+		g_sand.push(info);
+	}
+}
+
+function create_sand()
+{
+
+	//新しい砂を生成
+	const num  = random(g_create_num_min,g_create_num_max);
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const w    = sc_w * 0.6;
+	const w2   = w / 2;
+	
+	//空が前に集まるようにソート(検索効率がちょっと上がります)
+	g_sand.sort((a,b) => (!a.free && b.free)?1:-1);
+	
+	let   cnt = 0;
+	for(let i = 0;i < g_sand_num;++i)
+	{
+		let sand = g_sand[i];
+		
+		//空いてる場所に生成
+		if(sand.free)
+		{
+			sand.x    = (sc_w / 2) - w2 + random(0,w);
+			sand.y    = 0;
+			sand.v    = 1;
+			sand.a    = random(ACCEL_MIN,ACCEL_MAX) / 10;
+			sand.free = false;
+			
+			cnt++;
+			if(cnt == num)
+			{	break;	}
+		}
+		else
+		{
+			//空の要素が前に集まるようにソートしてるので、
+			//空じゃないものが来たらループ終わり
+			break;
+		}
+	}
+	
+}
+
+function is_space(x,y)
+{
+	
+	//指定の座標が空いているかを判定
+	const data = g_offsc.data;
+	const offw = g_start_cv.width;
+	
+	const p = (y * offw + x) << 2;
+	if((data[p]+data[p+1]+data[p+2]) == 0)
+	{
+		//空いてる
+		return true;
+	}
+	
+	//空いてない
+	return false;
+
+}
+
+function put_data(x,y,col)
+{
+	
+	//障害物図形データに追加
+	const data = g_offsc.data;
+	const offw = g_start_cv.width;
+	
+	const p = (y * offw + x) << 2;
+	data[p] = col;
+
+}
+
+
+function move_sand()
+{
+	
+	//砂の移動
+	const offw = g_start_cv.width;
+	const offh = g_start_cv.height;
+	
+	for(let i = 0;i < g_sand_num;++i)
+	{
+		let sand = g_sand[i];
+		if(!sand.free)
+		{
+			let fall = true;
+			const v  = sand.v | 0;	//整数に変換
+			
+			put_data(sand.x,sand.y,0);
+			for(let s = 0;s < v;++s)
+			{
+				//ひとつ下の座標が移動できる場所か？
+				if(is_space(sand.x,sand.y+1))
+				{
+					//障害物が無いので落下
+					sand.y++;
+				}
+				else
+				{
+					//障害物があるので、横にランダムに移動
+					//横への移動量は大きくしておかないとすぐに身動き取れなくなる…
+					const tx = sand.x + (random(3,6) * ((random(100) < 50) ? -1 : 1));
+					if(is_space(tx,sand.y))
+					{
+						//移動OK
+						sand.x = tx;
+					}
+					fall = false;
+					sand.v = 1;
+				}
+				
+				//画面外になったら消す
+				if((sand.x < 0) || (sand.x >= offw) || (sand.y >= (offh-1)))
+				{
+					fall = false;
+					sand.free = true;
+					break;
+				}
+			}
+			
+			//落下中なら加速させる
+			if(fall)
+			{	sand.v += sand.a;	}
+			
+			if(!sand.free)
+			{
+				//移動した位置に砂があることを覚えておく
+				put_data(sand.x,sand.y,1);
+			}
+		}
+	}
+
+}
+
+function draw_sand()
+{
+
+	//砂の描画
+	const ctx  = g_screen_ctx;
+	
+	for(let i = 0;i < g_sand_num;++i)
+	{
+		let sand = g_sand[i];
+		if(!sand.free)
+		{
+			ctx.strokeStyle = g_sand_col;
+			ctx.beginPath();
+			ctx.moveTo(sand.x  ,sand.y);
+			ctx.lineTo(sand.x+1,sand.y);
+			ctx.stroke();
+		}
+	}
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//画面クリア
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const ctx  = g_screen_ctx;
+	ctx.drawImage(g_start_cv,0,0);
+	
+	ctx.save();
+	
+	//砂の生成・移動・描画
+	create_sand();
+	move_sand();
+	draw_sand();
+
+	ctx.restore();
+	
+	//ブルーム処理
+	let screen = document.getElementById("game-screen");
+	do_bloom(ctx,screen);
+
+	ctx.save();
+	
+	//フェートイン・アウト
+	const time_ms = g_time - g_start_time;
+	if(time_ms < FADE_TIME)
+	{
+		ctx.globalAlpha = 1.0 - (time_ms / FADE_TIME);
+		ctx.fillStyle = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	else if(time_ms >= (MORPH_TIME - FADE_TIME))
+	{
+		ctx.globalAlpha = (time_ms - (MORPH_TIME - FADE_TIME)) / FADE_TIME;
+		ctx.fillStyle = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+
+	ctx.restore();
+	
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
