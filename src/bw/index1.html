@@ -1,0 +1,1344 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの刺繍円</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモでは、JavaScriptでBLACKWORKに書かれてる刺繍の模様のような
+	図形を極座標変換をして、円周上に並べてみることに挑戦します。
+	
+	参考にしたBLACKWORKという書籍はこちら。
+	https://www.amazon.co.jp/gp/product/4309289002/ref=ppx_yo_dt_b_asin_image_o02_s00?ie=UTF8&psc=1
+	
+	Copyright (c) 2021 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+ 	
+ 	The source code is licensed MIT.
+ 	However, the license for content created using this source code is CC BY-NC-SA 4.0.
+ 	http://creativecommons.org/licenses/by-nc-sa/4.0/
+ 	
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.8.0.js"></script>
+<!--<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>-->
+<style type="text/css">
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 340;
+let g_game_height   = 340;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+let g_bloom_offscs  = [];		//ブルーム処理用オフスクリーンcanvas
+
+const MORPH_TIME    = 8000;
+const FADE_TIME     = 200;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+
+let g_scale         = g_game_width / 600;
+let g_seed          = 0;
+let g_col           = [];
+let g_col_rnd       = 1;
+let g_col_list      = [];
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+//動画キャプチャ用定数
+const REC_TURN_NUM         = 7;
+const ENABLE_VIDEO_CAPTURE = false;
+
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 600;
+		g_game_height = 600;
+		g_scale       = 1.0;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//カラーリストの生成
+	const urls = 
+	[
+/*		今回はいつものカラーリストを使わない	
+		"https://coolors.co/00916e-feefe5-ffcf00-ee6123-fa003f",
+		"https://coolors.co/0b3954-087e8b-bfd7ea-ff5a5f-c81d25",
+		"https://coolors.co/ff6b35-f7c59f-efefd0-004e89-1a659e",
+		"https://coolors.co/dd7373-3b3561-ead94c-d1d1d1-51a3a3",
+		"https://coolors.co/483c46-3c6e71-70ae6e-beee62-f4743b",
+		"https://coolors.co/466365-b49a67-ceb3ab-c4c6e7-baa5ff",
+		"https://coolors.co/b7f0ad-d2ff96-edff7a-e8d33f-d17b0f",
+		"https://coolors.co/b7f0ad-d2ff96-edff7a-e8d33f-d17b0f",
+		"https://coolors.co/c1f7dc-c3d2d5-bda0bc-a2708a-824670",
+		"https://coolors.co/cbe896-fffffc-beb7a4-ff7f11-ff1b1c",
+
+		"https://coolors.co/ffbe0b-fb5607-ff006e-8338ec-3a86ff",
+		"https://coolors.co/5bc0eb-fde74c-9bc53d-e55934-fa7921",
+		"https://coolors.co/dd7373-3b3561-ead94c-d1d1d1-51a3a3",
+		"https://coolors.co/177e89-084c61-db3a34-ffc857-323031",
+		"https://coolors.co/495867-577399-bdd5ea-f7f7ff-fe5f55",
+		"https://coolors.co/b47eb3-fdf5bf-ffd5ff-92d1c3-8bb8a8",
+		"https://coolors.co/504746-b89685-bfada3-fbb7c0-b6244f",
+		"https://coolors.co/072ac8-1e96fc-a2d6f9-fcf300-ffc600",
+		"https://coolors.co/072ac8-1e96fc-a2d6f9-fcf300-ffc600",
+		"https://coolors.co/5bc0eb-fde74c-9bc53d-c3423f-404e4d",
+
+		"https://coolors.co/f7fff7-343434-2f3061-ffe66d-6ca6c1",
+		"https://coolors.co/a7a5c6-8797b2-6d8a96-5d707f-66ced6",
+		"https://coolors.co/ecebe4-cc998d-16f4d0-429ea6-153b50",
+		"https://coolors.co/a682ff-715aff-5887ff-55c1ff-102e4a",
+		"https://coolors.co/383d3b-eee5e9-7c7c7c-92dce5-52dee5",
+		"https://coolors.co/522b29-37ff8b-51d6ff-8d9ec6-a06b9a",
+		"https://coolors.co/420039-932f6d-e07be0-dcccff-f6f2ff",
+		"https://coolors.co/2e3532-8b2635-e0e2db-d2d4c8-d3efbd",
+		"https://coolors.co/780116-f7b538-db7c26-d8572a-c32f27",
+		"https://coolors.co/5bc0eb-fde74c-9bc53d-e55934-fa7921",
+
+		"https://coolors.co/1be7ff-6eeb83-e4ff1a-ffb800-ff5714",
+		"https://coolors.co/faf3dd-c8d5b9-8fc0a9-68b0ab-4a7c59",
+		"https://coolors.co/000f08-136f63-e0ca3c-f34213-3e2f5b",
+		"https://coolors.co/ffc759-ff7b9c-607196-babfd1-e8e9ed",
+		"https://coolors.co/e2efde-afd0bf-808f87-9b7e46-f4b266",
+		"https://coolors.co/201e1f-ff4000-faaa8d-feefdd-50b2c0",
+		"https://coolors.co/f1dede-bbacc1-80727b-909580-545643",
+		"https://coolors.co/f9c80e-f86624-ea3546-662e9b-43bccd",
+		"https://coolors.co/ffb86f-e0ca3c-ba5c12-3e2f5b-261132",
+		"https://coolors.co/3a2e39-1e555c-f4d8cd-edb183-f15152",
+
+		"https://coolors.co/f0a202-f18805-d95d39-202c59-581f18",
+		"https://coolors.co/af3800-fe621d-fd5200-00cfc1-00ffe7",
+		"https://coolors.co/f45b69-f6e8ea-22181c-5a0001-f13030",
+		"https://coolors.co/272727-2b50aa-ff9fe5-ffd4d4-ff858d",
+		"https://coolors.co/e5e059-bdd358-ffffff-999799-e5625e",
+		"https://coolors.co/bfb5af-ece2d0-d5b9b2-a26769-582c4d",
+		"https://coolors.co/141115-4c2b36-8d6346-ddf45b-c6f91f",
+		"https://coolors.co/88d18a-ccddb7-6a5b6e-f0b7b3-a833b9",
+		"https://coolors.co/334139-1e2d24-c52184-e574bc-f9b4ed",
+		"https://coolors.co/caa8f5-9984d4-592e83-230c33-b27c66",
+	
+		"https://coolors.co/485696-e7e7e7-f9c784-fc7a1e-f24c00",
+		"https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041",
+		"https://coolors.co/0f0a0a-f5efed-2292a4-bdbf09-d96c06",
+		"https://coolors.co/ebf5df-bad4aa-d4d4aa-edb458-e8871e",
+		"https://coolors.co/ebf5df-bad4aa-d4d4aa-edb458-e8871e",
+		"https://coolors.co/541388-d90368-f1e9da-2e294e-ffd400",
+		"https://coolors.co/a9b18f-cb807d-fe64a3-f6839c-f0b5b3",
+		"https://coolors.co/d8a47f-ef8354-ee4b6a-df3b57-0f7173",
+		"https://coolors.co/182825-016fb9-22aed1-6d8ea0-afa98d",
+		"https://coolors.co/1e212b-4d8b31-ffc800-ff8427-ffffff",
+		
+		"https://coolors.co/9046cf-cc59d2-f487b6-fff3f0-fde12d",
+		"https://coolors.co/ffe74c-ff5964-ffffff-6bf178-35a7ff",
+		"https://coolors.co/d4c5e2-c9d7f8-a7e2e3-80cfa9-4c6663",
+		"https://coolors.co/db995a-654236-d6d4a0-da7635-e24e1b",
+		"https://coolors.co/0a0903-ff0000-ff8200-ffc100-ffeaae",
+		"https://coolors.co/156064-00c49a-f8e16c-ffc2b4-fb8f67",
+		"https://coolors.co/fffd82-ff9b71-e84855-b56b45-2b3a67",
+		"https://coolors.co/cce8cc-f6efee-e2b6cf-e396df-e365c1",
+		"https://coolors.co/1b2f33-28502e-47682c-8c7051-ef3054",
+		"https://coolors.co/a62639-db324d-56494e-a29c9b-511c29",
+		
+		"https://coolors.co/78c0e0-449dd1-192bc2-150578-0e0e52",
+		"https://coolors.co/fe938c-edaf97-c49792-ad91a3-9d91a3",
+		"https://coolors.co/870058-a4303f-f2d0a4-ffeccc-c8d6af",
+		"https://coolors.co/e1d89f-cd8b76-c45baa-7d387d-27474e",
+		"https://coolors.co/33658a-86bbd8-758e4f-f6ae2d-f26419",
+		"https://coolors.co/bdc667-77966d-626d58-544343-56282d",
+		"https://coolors.co/eccbd9-e1eff6-97d2fb-83bcff-80ffe8",
+		"https://coolors.co/848c8e-435058-dcf763-bfb7b6-f1f2ee",
+		"https://coolors.co/363537-ef2d56-ed7d3a-8cd867-2fbf71",
+		"https://coolors.co/fc9f5b-fbd1a2-ece4b7-7dcfb6-33ca7f",
+		
+		"https://coolors.co/9b1d20-3d2b3d-635d5c-cbefb6-d0ffce",
+		"https://coolors.co/d0b8ac-f3d8c7-efe5dc-fbfefb-ffffff",
+		"https://coolors.co/5dd9c1-acfcd9-b084cc-665687-190933",
+		"https://coolors.co/a20021-f52f57-f79d5c-f3752b-ededf4",
+		"https://coolors.co/160f29-246a73-368f8b-f3dfc1-ddbea8",
+		"https://coolors.co/818479-b5cbb7-d2e4c4-e4e9b2-e7e08b",
+		"https://coolors.co/818479-b5cbb7-d2e4c4-e4e9b2-e7e08b",
+		"https://coolors.co/4d9de0-e15554-e1bc29-3bb273-7768ae",
+		"https://coolors.co/efbdeb-b68cb8-6461a0-314cb6-0a81d1",
+		"https://coolors.co/494947-35ff69-44ccff-7494ea-d138bf",
+		
+		"https://coolors.co/db995a-654236-d6d4a0-da7635-e24e1b",
+		"https://coolors.co/3891a6-4c5b5c-fde74c-db5461-e3655b",
+		"https://coolors.co/087e8b-ff5a5f-3c3c3c-f5f5f5-c1839f",
+		"https://coolors.co/f5cce8-ec9ded-c880b7-9f6ba0-4a2040",
+		"https://coolors.co/69fff1-63d471-63a46c-6a7152-233329",
+		"https://coolors.co/93b5c6-ddedaa-f0cf65-d7816a-bd4f6c",
+		"https://coolors.co/de6b48-e5b181-f4b9b2-daedbd-7dbbc3",
+		"https://coolors.co/de6b48-e5b181-f4b9b2-daedbd-7dbbc3",
+		"https://coolors.co/f7c1bb-885a5a-353a47-84b082-dc136c",
+		"https://coolors.co/404e5c-4f6272-b7c3f3-dd7596-cf1259"
+*/
+		//背景が白固定なので、濃い目の色を選びました
+		"https://coolors.co/02394a-043565-5158bb-f26df9-eb4b98",
+		"https://coolors.co/2f2d2e-41292c-792359-d72483-fd3e81",
+		"https://coolors.co/f46036-2e294e-1b998b-e71d36-c5d86d",
+		"https://coolors.co/ffb86f-e0ca3c-ba5c12-3e2f5b-261132",
+		"https://coolors.co/9b5de5-f15bb5-fee440-00bbf9-00f5d4",
+		"https://coolors.co/d741a7-3a1772-5398be-f2cd5d-dea54b",
+		"https://coolors.co/cdc392-e8e5da-9eb7e5-648de5-304c89",
+		"https://coolors.co/f75c03-d90368-820263-291720-04a777",
+		"https://coolors.co/ee6352-59cd90-3fa7d6-fac05e-f79d84",
+		"https://coolors.co/ffa630-d7e8ba-4da1a9-2e5077-611c35",
+		
+		"https://coolors.co/0e3b43-357266-a3bbad-65532f-312509",
+		"https://coolors.co/d5573b-885053-777da7-94c9a9-c6ecae",
+		"https://coolors.co/558b6e-88a09e-704c5e-b88c9e-f1c8db",
+		"https://coolors.co/a682ff-715aff-5887ff-55c1ff-102e4a",
+		"https://coolors.co/f6511d-ffb400-00a6ed-7fb800-0d2c54",
+		"https://coolors.co/fb3640-605f5e-1d3461-1f487e-247ba0",
+		"https://coolors.co/071e22-1d7874-679289-f4c095-ee2e31",
+		"https://coolors.co/1e152a-4e6766-5ab1bb-a5c882-f7dd72",
+		"https://coolors.co/daa89b-ae847e-2c0e37-690375-cb429f",
+		"https://coolors.co/21897e-3ba99c-69d1c5-7ebce6-8980f5",
+		
+		"https://coolors.co/1f271b-19647e-28afb0-f4d35e-ee964b",
+		"https://coolors.co/c0bcb5-4a6c6f-846075-af5d63-ed474a",
+		"https://coolors.co/acbea3-40476d-826754-ad5d4e-eb6534",
+		"https://coolors.co/d7263d-f46036-2e294e-1b998b-c5d86d",
+		"https://coolors.co/f2c57c-ddae7e-7fb685-426a5a-ef6f6c",
+		"https://coolors.co/673c4f-7f557d-726e97-7698b3-83b5d1",
+		"https://coolors.co/f18f01-048ba8-2e4057-99c24d-2f2d2e",
+		"https://coolors.co/a2666f-f49390-f45866-c45ab3-631a86",
+		"https://coolors.co/a2666f-f49390-f45866-c45ab3-631a86",
+		"https://coolors.co/231c07-392a16-634133-b86f52-f78764",
+		
+		"https://coolors.co/454ade-1b1f3b-b14aed-c874d9-e1bbc9",
+		"https://coolors.co/23231a-322f20-6a5837-988f2a-fe5f00",
+		"https://coolors.co/e3d26f-ca895f-a15e49-4e3822-2f1b25",
+		"https://coolors.co/efbc9b-ee92c2-9d6a89-725d68-a8b4a5",
+		"https://coolors.co/242331-533e2d-a27035-b88b4a-ddca7d",
+		"https://coolors.co/f2f3ae-edd382-fc9e4f-ff521b-020122",
+		"https://coolors.co/1e152a-4e6766-5ab1bb-a5c882-f7dd72",
+		"https://coolors.co/b5c2b7-8c93a8-62466b-45364b-2d2327",
+		"https://coolors.co/002500-929982-edcbb1-b7245c-7c3238",
+		"https://coolors.co/363537-ef2d56-ed7d3a-8cd867-2fbf71",
+		
+		"https://coolors.co/a8d5e2-f9a620-ffd449-548c2f-104911",
+		"https://coolors.co/0d1f22-264027-3c5233-6f732f-b38a58",
+		"https://coolors.co/02010a-04052e-140152-22007c-0d00a4",
+		"https://coolors.co/1c77c3-39a9db-40bcd8-f39237-d63230",
+		"https://coolors.co/a62639-db324d-56494e-a29c9b-511c29",
+		"https://coolors.co/181f1c-274029-315c2b-60712f-9ea93f",
+		"https://coolors.co/f46036-5b85aa-414770-372248-171123",
+		"https://coolors.co/1f2041-4b3f72-ffc857-119da4-19647e",
+		"https://coolors.co/586ba4-324376-f5dd90-f68e5f-f76c5e",
+		"https://coolors.co/83b692-f9ada0-f9627d-c65b7c-5b3758",
+		
+		"https://coolors.co/83b692-f9ada0-f9627d-c65b7c-5b3758",
+		"https://coolors.co/c52233-a51c30-a7333f-74121d-580c1f",
+		"https://coolors.co/82d4bb-82c09a-82ac9f-829298-94778b",
+		"https://coolors.co/210f04-452103-690500-934b00-bb6b00",
+		"https://coolors.co/7b7554-17183b-a11692-ff4f79-ffb49a",
+		"https://coolors.co/db504a-ff6f59-254441-43aa8b-b2b09b",
+		"https://coolors.co/3e78b2-004ba8-4a525a-24272b-07070a",
+		"https://coolors.co/8a716a-c2b8b2-197bbd-125e8a-204b57",
+		"https://coolors.co/000022-001242-0094c6-005e7c-040f16",
+		"https://coolors.co/0a2239-53a2be-1d84b5-132e32-176087",
+		
+		"https://coolors.co/c52233-a51c30-a7333f-74121d-580c1f",
+		"https://coolors.co/e71d36-af4319-772014-3f220f-19180a",
+		"https://coolors.co/f75c03-d90368-820263-291720-04a777",
+		"https://coolors.co/bf1a2f-f00699-454e9e-018e42-f7d002",
+		"https://coolors.co/0c090d-e01a4f-f15946-f9c22e-53b3cb",
+		"https://coolors.co/e09f7d-ef5d60-ec4067-a01a7d-311847",
+		"https://coolors.co/32021f-4b2e39-6c596e-6f7d8c-77a0a9",
+		"https://coolors.co/55dde0-33658a-2f4858-f6ae2d-f26419",
+		"https://coolors.co/ff4e00-8ea604-f5bb00-ec9f05-bf3100",
+		"https://coolors.co/ffd275-e8ae68-a57f60-e3a587-db5a42",
+		
+		"https://coolors.co/6622cc-a755c2-b07c9e-b59194-d2a1b8",
+		"https://coolors.co/095256-087f8c-5aaa95-86a873-bb9f06",
+		"https://coolors.co/f2dc5d-f2a359-db9065-a4031f-240b36",
+		"https://coolors.co/095256-087f8c-5aaa95-86a873-bb9f06",
+		"https://coolors.co/7c9eb2-52528c-372554-231123-000000",
+		"https://coolors.co/ff4e00-8ea604-f5bb00-ec9f05-bf3100",
+		"https://coolors.co/361134-b0228c-ea3788-e56b70-f391a0",
+		"https://coolors.co/22162b-451f55-724e91-e54f6d-f8c630",
+		"https://coolors.co/031d44-04395e-70a288-dab785-d5896f",
+		"https://coolors.co/d7263d-02182b-0197f6-448fa3-68c5db",
+		
+		"https://coolors.co/050505-004fff-31afd4-902d41-ff007f",
+		"https://coolors.co/232020-553739-955e42-9c914f-748e54",
+		"https://coolors.co/f75c03-d90368-820263-291720-04a777",
+		"https://coolors.co/78c0e0-449dd1-192bc2-150578-0e0e52",
+		"https://coolors.co/031a6b-033860-087ca7-004385-05b2dc",
+		"https://coolors.co/2e86ab-a23b72-f18f01-c73e1d-3b1f2b",
+		"https://coolors.co/32021f-4b2e39-6c596e-6f7d8c-77a0a9",
+		"https://coolors.co/d72638-3f88c5-f49d37-140f2d-f22b29",
+		"https://coolors.co/0e131f-38405f-59546c-8b939c-ff0035",
+		"https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041",
+		
+		"https://coolors.co/000f08-136f63-e0ca3c-f34213-3e2f5b",
+		"https://coolors.co/54457f-ac7b84-4c243b-b84a62-f5a6e6",
+		"https://coolors.co/1b2f33-28502e-47682c-8c7051-ef3054",
+		"https://coolors.co/9e0031-8e0045-770058-600047-44001a",
+		"https://coolors.co/ea638c-b33c86-190e4f-03012c-002a22",
+		"https://coolors.co/53dd6c-63a088-56638a-483a58-56203d",
+		"https://coolors.co/faa275-ff8c61-ce6a85-985277-5c374c",
+		"https://coolors.co/a8d5e2-f9a620-ffd449-548c2f-104911",
+		"https://coolors.co/a67db8-061a40-0353a4-006daa-003559",
+		"https://coolors.co/31393c-2176ff-33a1fd-fdca40-f79824"
+	];
+	g_col_list = [];
+	for(let i = 0;i < urls.length;++i)
+	{
+		g_col_list.push(createPalette(urls[i]));
+	}
+	
+}
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	let scale = 0.5;
+	const num = 1;//2;
+	for(let i = 0;i < num;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = sc_w * scale;
+		const cv_h = sc_h * scale;
+		
+		cv.width  = sc_w * scale;
+		cv.height = sc_h * scale;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(ctx,draw_screen)
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 5,10 ];
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(draw_screen,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+blur_w[idx]+"px)";
+		ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		ctx.restore();
+		
+		//draw_screenが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	reset();
+
+	//Video録画準備と開始
+	setupVideoCapture(REC_TURN_NUM,ENABLE_VIDEO_CAPTURE);
+
+}
+
+function reset()
+{
+
+	//乱数のシード値を決定
+	g_seed = rnd(12345);
+
+	//標準のパレットを決定
+	g_col = g_col_list[random(0,g_col_list.length-1)|0];
+	
+	//パレットランダムモード選択
+	g_col_rnd = (random(0,100) < 60) ? 1 : 0;
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+//Sayamaさんのワークショップ資料から引用
+//PCDJapan_WS_Generative Illustrations
+//https://www.openprocessing.org/sketch/1102169
+function separateGrid(x, y, w, h)
+{
+	//分割数
+	const num = 2;
+	
+	//最小幅
+	const min_w = g_game_width / 4;
+	
+	for(let yi = 0; yi < num; yi++)
+	{
+		for(let xi = 0; xi < num; xi++)
+		{
+			let dx = x + w / num * xi;
+			let dy = y + h / num * yi;
+			let dw = w / num;
+			let dh = h / num;
+			let rn = random();
+			if(rn < 0.5 && min(dw, dh) > min_w){
+				separateGrid(dx, dy, dw, dh);
+			}
+			else{
+				//描画命令
+				drawBWCircle(dx,dy,dw,dh);
+			}
+		}
+	}
+}
+
+function drawBWCircle(x,y,w,h)
+{
+	//BLACKWORK風図形の円を描画
+	//
+	// ※ちなみに図形は全てぼいちオリジナルです
+	//
+	
+	//パラメータ準備
+	const ctx   = g_screen_ctx;
+	const cx    = x + w / 2;
+	const cy    = y + h / 2;
+	const scale = 0.95;
+	
+	const ow2          = g_game_width / 2;
+	const shadow_scale = w / ow2;
+	
+	const w2    = w / 2;
+	const h2    = h / 2;
+	let palette = shuffle(g_col.slice());
+	let backcol = "#FFF";
+	
+	if(g_col_rnd)
+	{
+		//ランダムパレットモード
+		const pal = shuffle(g_col_list[random(0,g_col_list.length-1)|0].slice());
+		backcol = pal[0];
+		palette = pal.slice(1);
+	}
+	
+	//今回の最大半径を決める(この長さが全ての基準となります)
+	const radius_max = w2 * (random(70,100) / 100) * scale;
+	
+	//穴の半径の比率を決める
+	const hole_r = (random(10,30) / 100);
+	
+	//最大分割数を決める
+	const div_max = random(1,5);
+	
+	//極座標変換前の座標系のイメージ
+	//
+	//                   -Y
+	// (-1.0,-1.0)        |         (1.0,-1.0)
+	//      +-------------+-------------+ ←top
+	//      |             |      ↑     | 
+	//      |             |      ｜     | 
+	//      |             |      ｜     | 
+	//      +-------------+-------------+ ←bottom
+	//           ↑hole_r |      ｜radius_max         
+	//           ↓       |      ↓          
+	//  ------------------+------------------ +X
+	//                    |(0,0)
+	//
+	const w_div = 4;
+	
+	//分割ループ
+	let obj_list    = [];
+	let left_radius = 1.0 - hole_r;
+	let bottom      = -hole_r;
+	for(let i = 0;i < div_max;++i)
+	{
+		if(left_radius > 0)
+		{
+			//分割高さを決める
+			const h_ratio = ((i + 1) == div_max) ? 1.0 : (random(10,60) / 100);
+			let h         = left_radius * h_ratio;
+			let top;
+			
+			//模様パターンを決める
+			const pat = random(0,9);
+			
+			//パターン毎のグリッドセットの数からマスの辺のサイズを計算
+			const grid_set_list = [ 4,5,5,6,4,8,6,6,5,5 ];
+			const grid_mul_list = [ 3,4,5,5,6,6,7,7 ];
+			const grid_set      = grid_set_list[pat];
+			const set_num       = grid_mul_list[random(0,grid_mul_list.length-1)];
+			const grid_num      = grid_set * set_num;
+			const grid_size     = 2.0 / grid_num;
+			const grid_step     = grid_size / w_div;
+			
+			//領域の高さをグリッドにスナップさせる
+			h -= (h % grid_size);
+			top = bottom - h;
+			if(h < (grid_size * grid_set / 2))
+			{
+				//高さが足りない場合はスキップ
+				//(やり直したりすると無限ループに陥る場合があるので、
+				// 潔く諦めてスキップ)
+				continue;
+			}
+			
+			//パターン追加処理
+			let pat_list = [];
+			function add_pattern(vertex_list)
+			{
+				//描く部分の頂点情報をひとつ追加
+				const info = 
+				{	vlist: vertex_list.slice(),	}
+				pat_list.push(info);
+			}
+			
+			//パターンごとの頂点リストを生成
+			let pat_func = null;
+			switch(pat)
+			{
+				case 0:		//パターンA
+					
+					//4x4のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 0) && (gy == 0)) || ((gx == 1) && (gy == 1)) ||
+				   		   ((gx == 2) && (gy == 2)) || ((gx == 3) && (gy == 3)) ||
+				   		   ((gx == 2) && (gy == 1)) || ((gx == 1) && (gy == 2)))
+				   		{
+				   			//グリッドに合わせた四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+				   		}
+				   		
+				   		if(((gx == 2) && (gy == 1)) || ((gx == 1) && (gy == 2)))
+				   		{
+				   			//グリッドに合わせた☓を続きで作成
+				   			for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+							for(let p = w_div;p >= 0;--p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}				   		
+				   		}
+					};
+					
+					break;
+					
+				case 1:		//パターンB
+					
+					//5x5のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 0) && (gy == 0)) || ((gx == 3) && (gy == 0)) ||
+				   		   ((gx == 4) && (gy == 1)) || ((gx == 2) && (gy == 2)) ||
+				   		   ((gx == 0) && (gy == 3)) || ((gx == 1) && (gy == 4)) ||
+				   		   ((gx == 4) && (gy == 4)))
+				   		{
+				   			//グリッドに合わせた四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+				   		}
+				   		
+				   		if(((gx == 2) && (gy == 2)))
+				   		{
+				   			//グリッドに合わせた☓を続きで作成
+				   			for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+							for(let p = w_div;p >= 0;--p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}				   		
+				   		}
+					};
+					
+					break;
+				
+				case 2:		//パターンC
+					
+					//5x5のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 2) && (gy == 1)) || ((gx == 0) && (gy == 2)) ||
+				   		   ((gx == 0) && (gy == 4)))
+				   		{
+				   			//グリッドに合わせた左辺の無い四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y });	}
+					   		vertex_list.push({ x:x2,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y2 });	}
+				   		}
+				   		else if(((gx == 4) && (gy == 0)) || ((gx == 4) && (gy == 2)) ||
+				   		        ((gx == 2) && (gy == 3)))
+				   		{
+				   			//グリッドに合わせた:右左辺の無い四角を生成
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+				   		}
+				   		else if(((gx == 0) && (gy == 0)) || ((gx == 1) && (gy == 1)) ||
+				   		        ((gx == 3) && (gy == 3)) || ((gx == 4) && (gy == 4)))
+				   		{
+				   			//左上から右下への対角線を生成
+				   			vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   	}
+					};
+					
+					break;
+					
+				case 3:		//パターンD
+					
+					//5x5のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 2) && (gy == 0)) || ((gx == 0) && (gy == 2)) ||
+				   		   ((gx == 2) && (gy == 2)) || ((gx == 4) && (gy == 2)) ||
+				   		   ((gx == 2) && (gy == 4)) || ((gx == 5) && (gy == 5)))
+				   		{
+				   			//グリッドに合わせた四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+				   		}
+				   		else if(((gx == 3) && (gy == 1)) || ((gx == 1) && (gy == 3)))
+				   		{
+				   			//左上から右下への対角線を生成
+				   			vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   	}
+					   	else if(((gx == 1) && (gy == 1)) || ((gx == 3) && (gy == 3)))
+				   		{
+				   			//右上から左下への対角線を生成
+				   			vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+				   		
+				   		if(((gx == 2) && (gy == 2)) || ((gx == 5) && (gy == 5)))
+				   		{
+				   			//グリッドに合わせた☓を続きで作成
+				   			for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+							for(let p = w_div;p >= 0;--p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}				   		
+				   		}
+					};
+					
+					break;
+					
+				case 4:		//パターンE
+					
+					//4x4のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 1) && (gy == 0)) || ((gx == 3) && (gy == 0)) ||
+				   		   ((gx == 0) && (gy == 2)) || ((gx == 2) && (gy == 2)))
+				   		{
+				   			//左上から右下への対角線を生成
+				   			vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   	}
+					   	else if(((gx == 0) && (gy == 0)) || ((gx == 2) && (gy == 0)) ||
+					   	        ((gx == 1) && (gy == 2)) || ((gx == 3) && (gy == 2)))
+				   		{
+				   			//右上から左下への対角線を生成
+				   			vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+					   	else if(((gx == 0) && (gy == 3)) || ((gx == 2) && (gy == 3)))
+				   		{
+				   			//右辺だけを生成
+				   			vertex_list.push({ x:x2,y:y  });
+				   			vertex_list.push({ x:x2,y:y2 });
+					   	}
+				   	};
+					
+					break;
+					
+				case 5:		//パターンF
+					
+					//8x8のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 1) && (gy == 0)) || ((gx == 4) && (gy == 0)) ||
+				   		   ((gx == 7) && (gy == 0)) || ((gx == 5) && (gy == 1)) ||
+				   		   ((gx == 6) && (gy == 1)) || ((gx == 2) && (gy == 2)) ||
+				   		   ((gx == 4) && (gy == 2)) || ((gx == 7) && (gy == 2)) ||
+				   		   ((gx == 1) && (gy == 4)) || ((gx == 3) && (gy == 4)) ||
+				   		   ((gx == 6) && (gy == 4)) || ((gx == 0) && (gy == 5)) ||
+				   		   ((gx == 7) && (gy == 5)) || ((gx == 1) && (gy == 6)) ||
+				   		   ((gx == 4) && (gy == 6)) || ((gx == 6) && (gy == 6)))
+				   		{
+				   			//左上から右下への対角線を生成
+				   			vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   	}
+					   	else if(((gx == 0) && (gy == 0)) || ((gx == 3) && (gy == 0)) ||
+					   			((gx == 6) && (gy == 0)) || ((gx == 1) && (gy == 1)) ||
+					   			((gx == 2) && (gy == 1)) || ((gx == 0) && (gy == 2)) ||
+					   			((gx == 3) && (gy == 2)) || ((gx == 5) && (gy == 2)) ||
+					   			((gx == 0) && (gy == 4)) || ((gx == 2) && (gy == 4)) ||
+					   			((gx == 5) && (gy == 4)) || ((gx == 3) && (gy == 5)) ||
+					   			((gx == 4) && (gy == 5)) || ((gx == 2) && (gy == 6)) ||
+					   			((gx == 5) && (gy == 6)) || ((gx == 7) && (gy == 6)))
+				   		{
+				   			//右上から左下への対角線を生成
+				   			vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+				   	};
+					
+					break;
+					
+				case 6:		//パターンG
+					
+					//6x6のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 2) && (gy == 1)) || ((gx == 5) && (gy == 4)))
+				   		{
+				   			//グリッドに合わせた四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+				   		}
+				   		else if(((gx == 1) && (gy == 0)) || ((gx == 4) && (gy == 0)) ||
+				   			    ((gx == 0) && (gy == 1)) || ((gx == 1) && (gy == 1)) ||
+				   			    ((gx == 3) && (gy == 1)) || ((gx == 4) && (gy == 1)) ||
+				   			    ((gx == 0) && (gy == 2)) || ((gx == 3) && (gy == 2)) ||
+				   			    ((gx == 1) && (gy == 3)) || ((gx == 4) && (gy == 3)) ||
+				   			    ((gx == 0) && (gy == 4)) || ((gx == 1) && (gy == 4)) ||
+				   			    ((gx == 3) && (gy == 4)) || ((gx == 4) && (gy == 4)) ||
+				   			    ((gx == 0) && (gy == 5)) || ((gx == 3) && (gy == 5)))
+				   		{
+				   			//右上から左下への対角線を生成
+				   			vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+				   		
+				   		if(((gx == 2) && (gy == 1)) || ((gx == 5) && (gy == 4)))
+				   		{
+				   			//グリッドに合わせた☓を続きで作成
+				   			for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+							for(let p = w_div;p >= 0;--p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}				   		
+				   		}
+				   		
+				   		if(((gx == 0) && (gy == 2)) || ((gx == 3) && (gy == 2)) ||
+				   		   ((gx == 0) && (gy == 5)) || ((gx == 3) && (gy == 5)))
+				   		{
+				   			//左辺辺だけを生成
+				   			vertex_list.push({ x:x,y:y  });
+				   			vertex_list.push({ x:x,y:y2 });
+				   		}
+				   		else if(((gx == 1) && (gy == 0)) || ((gx == 4) && (gy == 0)) ||
+				   		        ((gx == 1) && (gy == 3)) || ((gx == 4) && (gy == 3)))
+				   		{
+				   			//右辺だけを生成
+				   			vertex_list.push({ x:x2,y:y  });
+				   			vertex_list.push({ x:x2,y:y2 });
+				   		}
+				   	};
+					
+					break;
+					
+				case 7:		//パターンH
+					
+					//6x6のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 0) && (gy == 0)) || ((gx == 4) && (gy == 0)) ||
+				   		   ((gx == 2) && (gy == 1)) || ((gx == 0) && (gy == 3)) ||
+				   		   ((gx == 4) && (gy == 3)) || ((gx == 2) && (gy == 4)) ||
+				   		   ((gx == 5) && (gy == 4)) || ((gx == 5) && (gy == 5)))
+				   		{
+				   			//グリッドに合わせた☓を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+				   		else if(((gx == 0) && (gy == 1)) || ((gx == 4) && (gy == 1)) ||
+				   		        ((gx == 0) && (gy == 2)) || ((gx == 2) && (gy == 2)) ||
+				   		        ((gx == 4) && (gy == 2)) || ((gx == 2) && (gy == 3)))
+				   		{
+				   			//左辺と右辺だけを生成
+				   			vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		vertex_list.push({ x:x2,y:y,move:true });
+					   		vertex_list.push({ x:x2,y:y2 });
+					   	}
+					};
+					
+					break;
+				
+				case 8:		//パターンI
+					
+					//5x5のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 0) && (gy == 0)) || ((gx == 0) && (gy == 2)) ||
+				   		   ((gx == 0) && (gy == 3)))
+				   		{
+				   			//グリッドに合わせた四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+				   		}
+				   		else if(((gx == 1) && (gy == 1)) || ((gx == 2) && (gy == 2)) ||
+				   		        ((gx == 3) && (gy == 3)) || ((gx == 4) && (gy == 4)))
+				   		{
+				   			//左上から右下への対角線を生成
+				   			vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   	}
+					   	else if(((gx == 4) && (gy == 1)) || ((gx == 3) && (gy == 2)) ||
+					   	        ((gx == 2) && (gy == 3)) || ((gx == 1) && (gy == 4)))
+				   		{
+				   			//右上から左下への対角線を生成
+				   			vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+				   		
+				   		if((gx == 0) && (gy == 0))
+				   		{
+				   			//グリッドに合わせた☓を続きで作成
+				   			for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+							for(let p = w_div;p >= 0;--p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}				   		
+				   		}
+					};
+					
+					break;
+					
+				case 9:		//パターンJ
+					
+					//5x5のマス目パターン
+					pat_func = function(x,y,gx,gy,vertex_list)
+					{
+						const x2 = x + grid_size;
+						const y2 = y + grid_size;
+				   		
+				   		if(((gx == 2) && (gy == 0)) || ((gx == 0) && (gy == 2)) ||
+				   		   ((gx == 4) && (gy == 2)) || ((gx == 2) && (gy == 4)))
+				   		{
+				   			//グリッドに合わせた四角を生成
+					   		vertex_list.push({ x:x,y:y });
+					   		vertex_list.push({ x:x,y:y2 });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y2 });	}
+					   		vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y });	}
+				   		}
+				   		else if(((gx == 1) && (gy == 0)) || ((gx == 4) && (gy == 0)) ||
+				   		        ((gx == 0) && (gy == 1)) || ((gx == 3) && (gy == 1)) ||
+				   		        ((gx == 1) && (gy == 3)) || ((gx == 4) && (gy == 3)) ||
+				   		        ((gx == 0) && (gy == 4)) || ((gx == 3) && (gy == 4)))
+				   		{
+				   			//左上から右下への対角線を生成
+				   			vertex_list.push({ x:x,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   	}
+					   	else if(((gx == 0) && (gy == 0)) || ((gx == 3) && (gy == 0)) ||
+					   	        ((gx == 1) && (gy == 1)) || ((gx == 4) && (gy == 1)) ||
+					   	        ((gx == 0) && (gy == 3)) || ((gx == 3) && (gy == 3)) ||
+					   	        ((gx == 1) && (gy == 4)) || ((gx == 4) && (gy == 4)))
+				   		{
+				   			//右上から左下への対角線を生成
+				   			vertex_list.push({ x:x2,y:y });
+					   		for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}
+					   	}
+				   		
+				   		if(((gx == 2) && (gy == 0)) || ((gx == 0) && (gy == 2)) ||
+				   		   ((gx == 4) && (gy == 2)) || ((gx == 2) && (gy == 4)))
+				   		{
+				   			//グリッドに合わせた☓を続きで作成
+				   			for(let p = 0;p <= w_div;++p)
+					   		{	vertex_list.push({ x:x+p*grid_step,y:y+p*grid_step });	}
+					   		vertex_list.push({ x:x2,y:y,move:true });
+							for(let p = w_div;p >= 0;--p)
+					   		{	vertex_list.push({ x:x2-p*grid_step,y:y+p*grid_step });	}				   		
+				   		}
+					};
+					
+					break;
+			}
+			
+			//グリッドパターンを生成
+			let y      = 0;
+			let grid_y = 0;
+			do
+			{
+				let n      = 0;
+				let x      = -1.0;
+				let grid_x = 0;
+				do
+				{
+					//パターン毎のグリッド頂点リストを生成
+					let vertex_list = [];
+					pat_func(x,top+y,grid_x,grid_y,vertex_list);
+					
+					//パターンに追加
+					add_pattern(vertex_list);
+					
+					//次のグリッドへ
+					grid_x = (grid_x + 1) % grid_set;
+					x += grid_size;
+					
+				}while(++n < grid_num);
+				
+				//次のグリッドへ
+				grid_y = (grid_y + 1) % grid_set;
+				y += grid_size;
+				
+			}while((y+grid_size) <= h);
+			
+			//topとbottomのラインも生成
+			const y_list = [ top,bottom];
+			for(let i = 0;i < 2;++i)
+			{
+				let x = -1.0;
+				let y = y_list[i];
+				let vertex_list = [];
+				
+				do
+				{
+					vertex_list.push({ x:x,y:y });
+					x += grid_step;
+					
+				}while(x <= 1.0);
+				vertex_list.push({ x:1.0,y:y });
+					
+				//パターンに追加
+				add_pattern(vertex_list);
+			}
+			
+			//このパターンの色を決める
+			const col = palette[obj_list.length % palette.length];
+			//const col = "#000";
+			
+			//このパターンの線の太さを決める
+			const line_w_list = [ 1.0,1.5,2.0,2.5,3.0 ];
+			const line_w = line_w_list[random(line_w_list.length-1)];
+			//const line_w = 2.0;
+			
+			//左右反転と上下反転を決める
+			const scale_lr  = (random(50,100) < 50) ? 1.0 : -1.0;
+			const scale_tb  = (random(50,100) < 50) ? 1.0 : -1.0;
+			
+			//刺繍パターン情報を追加
+			const info = 
+			{
+				top:       top,
+				botton:    bottom,
+				h:         h,
+				scale_lr:  scale_lr,
+				scale_tb:  scale_tb,
+				col:       col,
+				line_w:    line_w,
+				plist:     pat_list
+			};
+			obj_list.push(info);
+			
+			//次の刺繍領域へ
+			bottom      -= h;
+			left_radius -= h;
+		}
+	}
+
+	ctx.save();
+	
+	if(g_col_rnd)
+	{
+		//ランダムパレットモードは背景色を個別に描画
+		//ctx.fillStyle = backcol;
+		//ctx.fillRect(x,y,w,h);
+		//↑今回は、背景を白で統一しました
+	}
+	
+	ctx.translate(cx,cy);
+	ctx.shadowColor   = 'rgba(0,0,0,0.7)';
+	ctx.shadowOffsetX = 0 * shadow_scale;
+	ctx.shadowOffsetY = 0 * shadow_scale;
+	ctx.shadowBlur    = 2 * shadow_scale;
+
+	const offset_xa = rad(random(360));
+	//const offset_xa = g_time / 5000;		//こっちにするとカクカクだけど回転するよ
+	for(let i = 0;i < obj_list.length;++i)
+	{
+		const obj = obj_list[i];
+		for(let p = 0;p < obj.plist.length;++p)
+		{
+			const pinfo = obj.plist[p];
+			
+			ctx.save();
+
+			ctx.beginPath();
+			ctx.strokeStyle = obj.col;
+			ctx.lineWidth   = obj.line_w;
+			ctx.miterLimit  = 1.0;			//太線の鋭角時に飛び出すのを防ぐ
+			ctx.lineCap     = "round";
+			
+			for(let v = 0;v < pinfo.vlist.length;++v)
+			{
+				const vinfo = pinfo.vlist[v];
+				const x     = vinfo.x * obj.scale_lr;
+				const y     = vinfo.y * obj.scale_tb;
+				const xa    = TAU*((x+1.0)/2.0) + offset_xa;
+				
+				//極座標変換
+				let xx = y * Math.cos(xa);
+				let yy = y * Math.sin(xa)
+				//let xx = x;
+				//let yy = y;
+				
+				//描画領域に合わせて座標変換
+				xx *= radius_max;
+				yy *= radius_max;
+				
+				if((v == 0) || (vinfo.move != undefined))
+				{	ctx.moveTo(xx,yy);	}
+				else
+				{	ctx.lineTo(xx,yy);	}
+			}
+			
+			ctx.stroke();
+			
+			ctx.restore();
+		}
+	}
+	
+	ctx.restore();
+	
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//画面クリア
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const ctx  = g_screen_ctx;
+	ctx.fillStyle = "#FFF";
+	ctx.fillRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+	
+	randomSeed(g_seed);	//シードを固定して分割が毎回同じになるようにする
+	separateGrid(0,0,sc_w,sc_h);
+	//drawBWCircle(0,0,sc_w,sc_h);
+
+	ctx.restore();
+	
+	//ブルーム処理
+	//let screen = document.getElementById("game-screen");
+	//do_bloom(ctx,screen);
+
+/* 今回は描画に時間がかかるので、フェードイン・アウトはやめます
+
+	ctx.save();
+	
+	//フェートイン・アウト
+	const time_ms = g_time - g_start_time;
+	if(time_ms < FADE_TIME)
+	{
+		ctx.globalAlpha = 1.0 - (time_ms / FADE_TIME);
+		ctx.fillStyle = "#000000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	else if(time_ms >= (MORPH_TIME - FADE_TIME))
+	{
+		ctx.globalAlpha = (time_ms - (MORPH_TIME - FADE_TIME)) / FADE_TIME;
+		ctx.fillStyle = "#000000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+
+	ctx.restore();
+
+*/
+	
+	//色変更時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+		
+		//Video録画の停止判定
+		CheckVideoCapture();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
