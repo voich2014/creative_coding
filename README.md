@@ -51,6 +51,7 @@ creative_coding/
 
 - `bw`：[パパの刺繍円](https://voich2014.github.io/creative_coding/src/bw/index1.html)
 - `lsys2`：[パパのにょきにょき(L-System練習2)](https://voich2014.github.io/creative_coding/src/lsys2/index1.html)
+- `stat`：[パパのストレンジアトラクター](https://voich2014.github.io/creative_coding/src/stat/index1.html)
 
 ---
 

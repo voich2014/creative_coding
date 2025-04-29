@@ -1,0 +1,828 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのストレンジアトラクター</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモでは、JavaScriptでストレンジアトラクターを描いてみました。
+    
+    今回は、Koji Saitoさん(@KojiSaito)の note記事 
+    「Sprott のコードとストレンジアトラクタ探索機」を参考に、J.C.Sprott氏の
+    式を用いて自分なりのストレンジアトラクターを表示してみたいと思います。
+    https://note.com/kojisaito/n/n656981fa17bc
+
+    記事にしてくださったKoji Saitoさんに圧倒的感謝を！(*´ω｀*)
+
+    
+    Copyright (c) 2022 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+ 	
+ 	The source code is licensed MIT.
+ 	However, the license for content created using this source code is CC BY-NC-SA 4.0.
+ 	http://creativecommons.org/licenses/by-nc-sa/4.0/
+ 	
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.1.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.10.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.3.0.js"></script>
+<style type="text/css">
+	
+	body
+	{
+		background-color:#000;
+	}
+	
+	#game-screen
+	{
+		position: absolute;
+		top: 50%;
+		left: 50%;
+/*		
+		border: solid #322;
+		background-color: white;
+		box-shadow: inset 5px 5px 10px rgba(0,0,0,0.4);
+		filter: drop-shadow(15px 15px 10px rgba(0, 0, 0,0.4));
+*/
+		transform: translate(-50%,-50%);
+	}
+	
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width     = 320;
+let g_game_height    = 320;
+
+let g_time           = 0;		//現在時刻[ms]
+let g_dtime          = 0;		//前回の描画からの経過時間[ms]
+
+let g_screen_ctx     = null;
+let g_bloom_offscs   = [];		//ブルーム処理用オフスクリーンcanvas
+
+const PC_WIDTH       = 800;
+const PC_HEIGHT      = 800;
+const HI_WIDTH       = 1800;
+const HI_HEIGHT      = 1400;	//高解像度版の方の縦を少し小さくしておくと、最終的に引き伸ばしが入って、より光って見えることを発見した
+const MORPH_TIME     = 8000;
+const FADE_TIME      = 500;
+
+const POINT_NUM      = 15000;
+
+const MIN_col        = 0.01     * 1000;
+const MAX_col        = 0.25     * 1000;
+const MIN_r_amp      = 2.8      * 1000;
+const MAX_r_amp      = 4.6      * 1000;
+const MIN_nx         = 0.3      * 1000;
+const MAX_nx         = 0.4      * 1000;
+
+let g_start_time     = 0;
+let g_next_time      = 0;
+
+let g_image_cv       = null;
+let g_image_ctx      = null;
+let g_att_id         = "";
+let g_att_pos        = [];
+let g_add_c          = 0;
+let g_r_amp          = 0;
+let g_add_nx         = 0;
+
+let g_scale          = g_game_width / PC_WIDTH;
+let g_seed           = 0;
+let g_col            = [];
+let g_col_rnd        = 1;
+let g_col_list       = [];
+
+let g_last_fps_time  = 0;
+let g_fps_count      = 0;
+let g_fps            = 60;
+let g_fps_list       = [];
+let g_fps_visible    = true;
+
+let g_cnt            = 0;
+let g_auto_save_cnt  = 0;
+
+//動画キャプチャ用定数
+const REC_TURN_NUM         = 7;
+const ENABLE_VIDEO_CAPTURE = false;
+
+let g_selected = [];
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onclick     = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//ダブルクリックで画像として保存
+	window.ondblclick  = save_image;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width     = PC_WIDTH;
+		g_game_height    = PC_HEIGHT;
+		g_scale          = 1.0;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+//	screen.style.left = game_x+"px";
+//	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+	
+	//画面の幅に合わせて額縁の幅を比率で決める
+	const bw = (g_game_width * 0.05) | 0;
+	const pw = (g_game_width * 0.10) | 0;
+	screen.style.borderWidth = bw+"px";
+	screen.style.padding     = pw+"px";
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//カラーリストの生成
+	const urls = 
+	[
+		//アクセントになるように明るい色が少しある感じのパレットを選びました
+		"https://coolors.co/227c9d-17c3b2-ffcb77-fef9ef-fe6d73",
+		"https://coolors.co/f6fedb-e6d3a3-d8d174-b6c454-91972a",
+		"https://coolors.co/704e2e-79745c-e6f8b2-cde77f-709176",
+		"https://coolors.co/6d213c-946846-baab68-e3c16f-faff70",
+		"https://coolors.co/7b3e19-b28b84-f5e5fc-8ae1fc-48b8d0",
+		"https://coolors.co/97ead2-8cc7a1-816e94-74226c-4b2142",
+		"https://coolors.co/397367-63ccca-5da399-42858c-35393c",
+		"https://coolors.co/e88d67-bb999c-9999c3-7b8cde-c0e6de",
+		"https://coolors.co/ff1053-6c6ea0-66c7f4-c1cad6-ffffff",
+		"https://coolors.co/173753-6daedb-2892d7-1b4353-1d70a2",
+		
+		"https://coolors.co/eabfcb-c191a1-a4508b-5f0a87-2f004f",
+		"https://coolors.co/0d3b66-faf0ca-f4d35e-ee964b-f95738",
+		"https://coolors.co/293132-474044-4f5165-547aa5-50d8d7",
+		"https://coolors.co/3a405a-f9dec9-99b2dd-e9afa3-685044",
+		"https://coolors.co/87f1ff-c0f5fa-bd8b9c-af125a-582b11",
+		"https://coolors.co/1f271b-19647e-28afb0-f4d35e-ee964b",
+		"https://coolors.co/d30c7b-ffe3dc-dbb4ad-a2ad91-3a2d32",
+		"https://coolors.co/011627-ff0022-41ead4-fdfffc-b91372",
+		"https://coolors.co/41d3bd-fffff2-791e94-de6449-407899",
+		"https://coolors.co/0f5257-0b3142-9c92a3-c6b9cd-d6d3f0",
+		
+		"https://coolors.co/f18f01-048ba8-2e4057-99c24d-2f2d2e",
+		"https://coolors.co/f1dede-d496a7-5d576b-6cd4ff-fe938c",
+		"https://coolors.co/20bf55-0b4f6c-01baef-fbfbff-757575",
+		"https://coolors.co/a4036f-048ba8-16db93-efea5a-f29e4c",
+		"https://coolors.co/1c0221-7b5e7b-938274-e9eb87-b9f18c",
+		"https://coolors.co/dcfffd-52ffee-4fb477-3f6634-345511",
+		"https://coolors.co/32292f-575366-6e7dab-5762d5-d1e3dd",
+		"https://coolors.co/6699cc-fff275-ff8c42-ff3c38-a23e48",
+		"https://coolors.co/2d3142-bfc0c0-ffffff-ef8354-4f5d75",
+		"https://coolors.co/00916e-feefe5-ffcf00-ee6123-fa003f",
+
+		"https://coolors.co/16697a-489fb5-82c0cc-ede7e3-ffa62b",
+		"https://coolors.co/5c573e-a5b452-c8d96f-c4f7a1-9ba7c0",
+		"https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041",
+		"https://coolors.co/0a090c-f0edee-07393c-2c666e-90ddf0",
+		"https://coolors.co/6bd425-618b25-42113c-370926-1c0118",
+		"https://coolors.co/161925-23395b-406e8e-8ea8c3-cbf7ed",
+		"https://coolors.co/93b7be-f1fffa-d5c7bc-785964-454545",
+		"https://coolors.co/b2abf2-89043d-2fe6de-1c3041-18f2b2",
+		"https://coolors.co/484041-434371-79aea3-70ee9c-b5f44a",
+		"https://coolors.co/a7c6da-eefcce-9eb25d-f1db4b-edff71",
+
+		"https://coolors.co/aba9bf-beb7df-d4f2d2-34113f-868784",
+		"https://coolors.co/45062e-7f055f-e5a4cb-ebd2be-ffe8d4",
+		"https://coolors.co/e1d89f-cd8b76-c45baa-7d387d-27474e",
+		"https://coolors.co/0d1321-1d2d44-3e5c76-748cab-f0ebd8",
+		"https://coolors.co/091540-7692ff-abd2fa-3d518c-1b2cc1",
+		"https://coolors.co/253031-315659-2978a0-bcab79-c6e0ff",
+		"https://coolors.co/0c1618-004643-faf4d3-d1ac00-f6be9a",
+		"https://coolors.co/177e89-084c61-db3a34-ffc857-323031",
+		"https://coolors.co/343434-2f3061-0e34a0-5f5980-dfdfdf",
+		"https://coolors.co/1b2f33-28502e-47682c-8c7051-ef3054"
+	];
+	g_col_list = [];
+	for(let i = 0;i < urls.length;++i)
+	{
+		g_col_list.push(createPalette(urls[i]));
+	}
+	
+	//高解像度用のキャンバスを準備
+	g_image_cv  = document.createElement("canvas");
+	g_image_ctx = g_image_cv.getContext("2d");
+	
+	g_image_cv.width  = HI_WIDTH;
+	g_image_cv.height = HI_HEIGHT;
+
+}
+
+function setup_bloom(w = g_game_width,h = g_game_height)
+{
+	//ブルーム処理用の準備
+
+	let scale = 0.5;
+	const num = 2;//(g_scale == 1.0) ? 2 : 1;
+	for(let i = 0;i < num;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = w * scale;
+		const cv_h = h * scale;
+		
+		cv.width  = cv_w;
+		cv.height = cv_h;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(sc_ctx,sc_cv)
+{
+	//ブルーム処理を実施
+	
+	//sc_ctx,sc_cvはブルーム処理をかけて上書きする元画像の2DContextとcanvasです
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = sc_cv.width;
+	const sc_h = sc_cv.height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 4,16 ];
+	//if(g_scale != 1.0){ blur_w = [ 3,6 ]; }	//スマホはこっち
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(sc_cv,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		sc_ctx.save();
+		sc_ctx.globalAlpha = 1.0;
+		sc_ctx.globalCompositeOperation = 'lighter';
+		sc_ctx.filter="blur("+blur_w[idx]+"px)";
+		sc_ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		sc_ctx.restore();
+		
+		//sc_cvが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//ブルーム処理の準備
+	setup_bloom(HI_WIDTH,HI_HEIGHT);
+
+	//最初の値を決める
+	reset();
+	
+	//Video録画準備と開始
+	setupVideoCapture(REC_TURN_NUM,ENABLE_VIDEO_CAPTURE);
+
+}
+
+function reset()
+{
+
+	//乱数のシード値を決定
+	g_seed = rnd(12345);
+	randomSeed(g_seed);
+
+	//標準のパレットを決定
+	g_col = shuffle(g_col_list[random(0,g_col_list.length-1)|0]);
+	
+	//パレットランダムモード選択
+	g_col_rnd = (random(0,100) < 60) ? 1 : 0;1
+	
+	//ストレンジアトラクター関連の設定
+	reset_attractor();
+	
+	g_add_c  = random(MIN_col  ,MAX_col  )/1000;
+	g_r_amp  = random(MIN_r_amp,MAX_r_amp)/1000;
+	g_add_nx = random(MIN_nx   ,MAX_nx   )/1000;
+
+}
+
+function reset_attractor()
+{
+	//ストレンジアトラクター関連の設定
+	
+	while(1)
+	{
+		//ストレンジアトラクターのIDを決定
+		function att_idchar()
+		{
+			const ascii = random("A".charCodeAt(0),"Y".charCodeAt(0));
+			return String.fromCharCode(ascii);
+		}
+		if(0)
+		{
+			//ランダムにIDを選択
+			for(let i = 0;i < 12;++i)
+			{	g_att_id += att_idchar();	}
+		}
+		else
+		{
+			//選定済みのIDからランダムチョイス
+			g_att_id = get_att_id();
+			
+			//ちょっと入れ替えるだけでまともに見れない図形に
+			//なったりしたので、やっぱり入れ替え作戦は中止
+			/*
+			if((random(0,100) < 30))
+			{
+				//たまに数文字入れ替えする
+				const rep_num = random(1,3);
+				for(let i = 0;i < rep_num;++i)
+				{
+					const rep_pos = random(1,12);
+					const front   = g_att_id.substr(0,rep_pos-1);
+					const back    = g_att_id.substr(rep_pos);
+					
+					g_att_id = front + att_idchar() + back;
+				}
+			}
+			*/
+		}
+		
+		//パラメータ決定
+		//
+		// パラメータは -1.2 から +1.2 まで 0.1 刻みで
+		// -1.2をAに、+1.2をYに当てはめた25文字の範囲で表した
+		// IDを元に設定されます
+		//
+		let param_list = [];
+		for(let i = 0;i < g_att_id.length;++i)
+		{
+			const p = -1.2 + (g_att_id.charCodeAt(i) - 0x41) * 0.1;	//0x41は'A'のASCIIコード
+			param_list.push(p);
+		}
+		
+		function next(x,y)
+		{
+			//
+			// J.C.Sprott氏 の式
+			//
+			// newX = a1 + a2*x + a3*x*x +  a4*x*y +  a5*y +  a6*y*y
+		    // newY = a7 + a8*x + a9*x*x + a10*x*y + a11*y + a12*y*y
+			//
+			const p  = param_list;
+			const nx = p[0] + x*(p[1] + p[2]*x + p[3]*y) + y*(p[ 4] + p[ 5]*y);
+			const ny = p[6] + x*(p[7] + p[8]*x + p[9]*y) + y*(p[10] + p[11]*y);
+			return { x:nx, y:ny };
+		}
+		
+		//座標分布の最大値を用いてスケールも計算
+		const x0 = random(1,10) / 1000;
+		const y0 = random(1,10) / 1000;
+		let x_mm  = { min: 0, max: 0 };
+		let y_mm  = { min: 0, max: 0 };
+		let pos   = { x: x0, y: y0 };
+		g_att_pos = [];
+		for(let i = 0;i < POINT_NUM;++i)
+		{
+			pos = next(pos.x,pos.y);
+			g_att_pos.push(pos);
+			if(pos.x < x_mm.min){ x_mm.min = pos.x; }
+			if(pos.x > x_mm.max){ x_mm.max = pos.x; }
+			if(pos.y < y_mm.min){ y_mm.min = pos.y; }
+			if(pos.y > y_mm.max){ y_mm.max = pos.y; }
+		}
+		
+		//座標の偏りを調整して、中心に絵ができるように
+		//オフセットを計算し、最大値も補正
+		const x_w2     = (x_mm.max - x_mm.min) / 2;
+		const y_h2     = (y_mm.max - y_mm.min) / 2;
+		const x_min    = Math.abs(x_mm.min);
+		const y_min    = Math.abs(y_mm.min);
+		const offset_x = (x_min < x_mm.max) ? -(x_mm.max - x_w2) : (x_min - x_w2);
+		const offset_y = (y_min < y_mm.max) ? -(y_mm.max - y_h2) : (y_min - y_h2);
+		
+		//描画時には、描画領域の半分を1.0として -1.0 ～ 1.0の範囲が
+		//見える範囲になるので、最大値が±1.0になるように座標値を補正します。
+		//ただし、ぴっちりにしてしまうとBloomの光が切れてしまうので、ほんの
+		//ちょっと縮小しておきます。
+		//
+		//あと、描画時の高速化のため、ここでcx,cyを掛けて座標位置を
+		//計算しきってしまいます。
+		const max_xy = Math.max(x_w2,y_h2);
+		const scale  = (1.0 / max_xy) * 0.975;
+		const cx     = HI_WIDTH  / 2;
+		const cy     = HI_HEIGHT / 2;
+		for(let i = 0;i < g_att_pos.length;++i)
+		{
+			g_att_pos[i].x += offset_x;
+			g_att_pos[i].y += offset_y;
+			g_att_pos[i].x *= (scale * cx);
+			g_att_pos[i].y *= (scale * cy);
+		}
+		
+		//妥当な範囲に入ってない場合はもう一回リセット
+		if((x_w2 < 3.0) && (y_h2 < 3.0) &&
+		   (x_w2 > 1.0) && (y_h2 > 1.0))
+		{	break;	}
+		
+	}
+	
+}
+
+function get_att_id()
+{
+	
+	//あらかじめ選定したIDの中からランダムでチョイス
+	
+	const att_ids = //360個あります
+	[
+		"WCHMQMRDIFHK","TMMOWHFAYGSN","PHIYDFXPDOKF","YBMPKKWOYHDK","DEQLIPJMJTGT","IHSRNCXRSMAD",
+		"VWJMJFMOBKIO","TFHRNKWQDHBM","NITPIGRVGSEN","MWNLTIOEYKGM","GAGKCPINRKES","TJITDSDGPERO",
+		"HLFAGKFSVWGX","GKKXHQNSGQIQ","XBOBSLTYEOBF","XUOENKXGOWHL","FJSDJEXKFLAL","QUHEQXFGRHFW",
+		"PTLHAMGWPMIP","NFGPXDNUSHDH","UGGHODXQQSEQ","DYMERPINPQFS","XLRKPGTFDKQS","CEOHBJQKIVEU",
+		"OPOPJECYXFST","KBTENOBHOWAQ","CQVCSMIPUJET","BNWJUURHDCQI","HCNQAHAWPNAJ","YOIOGJIYSMGN",
+		"BIRIVNNHWIEU","HHHYLBHUSPYN","MCCHPHVRRDFB","CPUWDVXQTSYD","GHSXMWUCIFJF","XDOQRNFHPMCV",
+		"LICPGVJEEVIS","BTRRITKLDRHR","LKTHFGHLUEXO","CMSHKRNWBHTQ","AVRBWKSHRNAQ","QJCVBIHHLELX",
+		"WIJREMALMHWU","OFXQKBBKTGHV","FFOKBGXKDDRM","JLOLHFCOPWOH","XJDGINIFSWDW","PJFODCBJFVRW",
+		"HSLFXKEEONJR","YIILJDPNUKJG","FROVGNQNCHEJ","MIQOAROYJJBT","RIAHYFXKQTJI","OTFUHRXOGKON",
+		"IJQPXKXRADMQ","RYLDBNIXPMAS","TLKPXOSMCUJL","LJLREDBRVMRL","YMAMOGVYFMOF","LAKIPURKKDTT",
+		"RJINWLJDHREE","HCUKOQXKIWKD","MGKKATHWXTRR","UXLRCBUHIGQM","SAGNOKQLPVTI","MMJTODCQSLVP",
+		"LQUHFBGYYIWS","OQVLDGDXURBL","ESNMHWQKXLJI","IENHJUIUNCTL","XLBDKDNWNEOK","REILEHGBMEEN",
+		"EJOFTSJGWEMT","BNWJUURHDCQI","AGUGSPKOUQIJ","BIRLONVXQFPD","QBDBHJHSSLDU","GVMSSVQHUSFF",
+		"OKPALNLPGBAR","XRMVSLDSJQDX","XOWXKFCODPCY","DBULOXMLPCEE","KFXSXYQIFHRM","FWRISRCEHDWT",
+		"TCBSOLDNLHMU","FFNJVLRCPPBU","GALDMNUIBGBA","IJRRLUCDSQHO","UPBMCAAJPGIS","OIJUIOXRFWDB",
+		"UOJDYLCJRLEV","XJDGINIFSWDW","APTTTSDRJLGO","FCVUCVVYABMD","BYPSTQNQJPAK","CCITEKSAEFLB",
+		"YUQJNFLABGQR","PNJTQLYWIGVC","YPDHAOKIVKJP","OQSMGFXMNNEF","PJJMXBHRMDIT","BOCIFXJYDUPS",
+		"THQPMFCEUKYS","YDABAFDWFGXP","IPLDOMMVPXPW","CSTYWCDFPTON","QVHOEKEMYUSS","PASOOKKLFMYR",
+		"VEPBVJHMIKCS","CDPKRJKFOBPS","XNDQCVKAWQPP","PYDQRWLUJUKE","MBMWREMUPMDO","HUPBNQACWIIQ",
+		"LMHWEWCPXNQM","KNMJCVHDVLDU","GETVHUWCNMUH","XFBNOFQMQCQH","KIFLCNBRMGDE","XHGPNOVNIRVJ",
+		"FAHXXNEROTOX","RCJPHDKWWGDI","FNEBLMEGTYJV","AKRSMVGEMKWW","XJDGINIFSWDW","UDAMOQKBICRX",
+		"OFHWOKCRPMBR","GSOOTKULHYPH","XBMMAVQAWJJS","DIPKFNRHMHIB","IVIRQTMQELQU","YOFIHAOEGITP",
+		"FSKGGPALYXKS","YRFFRGTQXFRJ","MIKJGDCYVJKL","SYFOAFOGHDFH","RKTGSEDCTFUW","QJUPFGYKBCQN",
+		"ILVTWVNFUKHD","MPHVLSYPLQIL","WIFKEKVLIYWJ","WCHTRKYKMGRE","IOPRHXHYKELU","ATNLHPOJXRWK",
+		"BYYUPNBQKKYS","UPRYOEPSGFDT","CMQESOSTLHGB","NQGDKTCNSBSV","UUKVEDIEHQFR","FWTYKKQBCGHF",
+		"DIXTDPKWKGTL","NTWVXJOHBLLQ","GBOITXQNGNEQ","GFPJGPODPVHR","EGXRNOGSWWCR","JPUQTCYPFOQL",
+		"XMNOCOWNKFNF","SCLLDNHPVNDX","OEMKTUXKGHED","WPPDNIQEXOOI","GGSEWNUWLGAT","UQEEKJWJKLGA",
+		"IXLMKPCYMEWQ","TUKDPDRODLKL","DKKSLJWKFWYL","MITGFBREKYUS","URLJEEHNSSDJ","QKILEUMCQPNO",
+		"LDWUKBXIFKOO","RDKCSWJXHPBO","ENUTGJQYKOIE","TAAOLQAUUFTL","BGYMNPQYCHPO","WCHTRKYKMGRE",
+		"YJLOLBBCWXAT","GFOGSVOQEHDL","NCCORVTDCKTQ","TOVBYBGRVCQE","NCKORQHJWCEX","ODDSEAHQKHAM",
+		"NAPLPFQDNXVO","NIMETUWIICOJ","PDIODGQQIMBH","MSNOLDBYYCMS","FHSQIXEETIJR","OXRUUJBXWSWT",
+		"JTJSHGATQFMY","YMOQIFHQALNS","NBENQMWQGHFJ","BCHMAEVKHPDD","BELOAFSQBXNH","MKQKFHXOHWEA",
+		"YMIQFJWROURG","HFTHOJVEITLC","PGQUUTVPDBNE","URBDUMVHMFGD","OACGGHVTPNHE","IDKKUTSDHGNO",
+		"ROQGKBTEDLEN","XBFNOOTIGSAQ","IFSTCFTTHNUQ","UWGAGFEERKFN","DNXPNUVKIYEL","MNWMEIOYFNNN",
+		"BYWMVRBLWLRJ","UHKPMGEYSOLK","ONNRYHUAEIKJ","BCNVKVMOIQGP","NNQRSUBYIUDU","WRJGKDQYGOGJ",
+		"LACSRKFTVVFY","XEGMIFBWVWMR","LDWUKBXIFKOO","LIWOSGJAYYEP","SLJHSUXMGEHC","JCDOROCJVAWN",
+		"URBDUMVHMFGD","IPXQXIFUYVRH","DUKSGKSUDUNK","WKIMVJQVMPPJ","DJEMGSARQHDY","QJQGSVACSRFU",
+		"EVXFYAKUSPYF","NIGAMNGXTQPH","QKDUFKJYUFAU","RELMTGERVJGP","FOMTXOLRLRHX","AKNOUVNOBWUQ",
+		"HWPUIPTIBRKH","OCEDVQNTBKJI","WXGWCBYMCJOG","UCDQVPSEBCQM","GGMLSMYBWPCL","UYQXCNGJECXP",
+		"RQMYFYCESMOS","IDUUEOILIPFO","KBTENOBHOWAQ","QHMTYJTSMGIH","VYISCEGARTEK","JJQSXJERXTQK",
+		"SEHNBITQLIGH","IWOPHRRRWUMM","BKQNHPFDVQGM","TULPGFROBLFM","PGQUUTVPDBNE","XIECHPDBTMNK",
+		"SKBVHPMLASIV","NDKRWDXIFWUJ","VNEKNBTVVDGJ","IPYYFITQDJKH","DQVUBTXOUSYG","ARNIATRMRHHJ",
+		"DBSMYTGMKMFM","TPONILJNUUBV","AKVNAKHTJNLN","FWVBMISDLRQJ","FDVGUSNCNMFI","QBRTQGIQWWIV",
+		"NYGMFOGTFBHH","UAAFJLOVWMLG","IJLMVMKAUOPH","FRGUXXHPDOJX","WHUCRHFKTPBB","COHXHLQJGTEG",
+		"BDPNNYQNIMAD","BFIVISYCAOOE","JGYXMHFSSMMX","FFXDLYQLHDSQ","TLKPXOSMCUJL","JGOJYNTBDPTJ",
+		"SGKFYYUALAOG","DITSUKILQPAY","BTMEPLINVXSP","AEQNRMBCJVLN","LHFOYQHFREXN","XROBDONGRKDR",
+		"NPNLMBFPSQRL","NGXOHFPIEURW","ATSTENEMEOAK","CSTAURALRBAJ","IMRJVPEBSREQ","UPJKYJNLYILM",
+		"JMYAMMSKRCXH","SEUPXDINWSPA","RIICGLFASKXX","QJLTNFABBMOR","OCOUGHDBRGJK","APORSSDLVXIM",
+		"ONHIJRXGBJWM","YLDKUBKRTYLO","VDJMPGGTIFFT","JHLUWLKTJMLX","GIULVTIUGLKQ","CRNFMXLOEGDS",
+		"KTSOBNOOTXIB","LMTHASRVCFBW","WSMBVDNOBVAW","BARCKPJAHINN","MIPLSGGYPUKD","DSXNGJTBCLLF",
+		"LDSTIBOGPMCB","SGOFNJTWQOEE","AQQOGKKJDRGO","CSUEFWFYSINY","KJMHBSKGUQBQ","DJVMENTGEFGA",
+		"NBNDSAUMHHEN","SWLBYFVJEMHN","LHKUMXAQRIGQ","HGVHXJJUQXNF","EAVATXEKFSLU","YFCNQANPPCIA",
+		"COVNGHCMLWVY","VNEDWMJFJJAN","YANHKBDGNKCK","XJDGINIFSWDW","TDKMWFQRVAGL","MNMTUVAGTALH",
+		"BIQRSWRLFSDK","KENDXNAITMKO","ISOGUKPYUDQM","YGGNTNYQGNVF","JJILJSESPDUV","XKFXJWCKTAXN",
+		"GWKQSUMXJREH","DYSQDMIDBFBI","EGXRNOGSWWCR","DJQHAIWCACHD","FJMSRUGXLIMN","KJNLOTBOPBGW",
+		"DBSMYTGMKMFM","EFVFBNLXDQUT","EITTLLSVFMGN","LNUNCPNDUNPF","IJOAKYXHNHUK","WVGGPQDDUKCQ",
+		"GGMLSMYBWPCL","ALJKNRJELDGN","HAVPLPVJAOHM","XEDKODQJFVGM","XVMEJMMISCIJ","VIKJILOYXDCO",
+		"VFNIEHWRLOPD","RXJPUMSTKIHK","DLRAPPMVOVKS","PYTXFHFDDBDJ","KMQMMHJTKKGP","DHRKCXLEHUHS",
+		"TKRBOFCUQYKY","KFMRKXYNFSFG","KBTENOBHOWAQ","JMYAMMSKRCXH","VIKJILOYXDCO","KONYILUUGLPJ",
+		"OKJNAGTUMKDS","QBQMVWSMIOSO","FDSENTTOWBHK","EWQDLEKQVVJM","XPOUAALCUMGJ","DITFPOPUVYJF"
+	];
+	
+	return att_ids[random(0,att_ids.length-1)|0];
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps + "   ID:"+g_att_id + "   ramp="+g_r_amp;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function save_image()
+{
+	var canvas = document.getElementById("game-screen");
+	
+	//現在時刻+IDでファイル名を生成
+	const dt   = new Date();
+	const date = dt.getFullYear().toString() + 
+				 ("0" + (dt.getMonth() + 1).toString()).slice(-2) +
+				 ("0" + dt.getDate().toString()).slice(-2) +
+				 ("0" + dt.getHours().toString()).slice(-2) +
+				 ("0" + dt.getMinutes().toString()).slice(-2) +
+				 ("0" + dt.getSeconds().toString()).slice(-2);
+	const dl_filename = date+"_"+g_att_id+".png";
+	
+	if(canvas.msToBlob)
+	{
+		//for IE
+		var blob = canvas.msToBlob();
+		window.navigator.msSaveBlob(blob,dl_filename);
+	}
+	else
+	{
+		//アンカータグを作成
+		var a  = document.createElement('a');
+		a.href = canvas.toDataURL('image/png');
+		
+		//ダウンロード時のファイル名を指定
+		a.download = dl_filename;
+		
+		//クリックイベントを発生させる
+		a.click();
+	}
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	randomSeed(g_seed);	//シードを固定してランダム結果が毎回同じになるようにする
+	
+	//画面クリア
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const hi_w   = HI_WIDTH;
+	const hi_h   = HI_HEIGHT;
+	const ctx    = g_screen_ctx;
+	const hi_cv  = g_image_cv;
+	const hi_ctx = g_image_ctx;
+	
+	hi_ctx.fillStyle = "#000";
+	hi_ctx.fillRect(0,0,hi_w,hi_h);
+	
+	ctx.save();
+	
+	//フェートイン
+	const time_ms = g_time - g_start_time;
+	if(time_ms < FADE_TIME)
+	{
+		ctx.globalAlpha = (time_ms / FADE_TIME);
+		ctx.fillStyle   = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	else
+	{
+		ctx.globalAlpha = 1;
+		ctx.fillStyle   = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	
+	hi_ctx.restore();
+	
+	hi_ctx.save();
+	
+	//パラメータ準備
+	const cx     = hi_w / 2;
+	const cy     = hi_h / 2;
+	const add_c  = g_add_c;
+	const r_amp  = g_r_amp;
+	const add_nx = g_add_nx;
+	const td     = 600;
+	const t      = g_time / td;
+	const tt     = t / 4;
+	const col    = g_col;
+	const time   = g_time - g_start_time;
+
+	//描画準備
+	hi_ctx.globalCompositeOperation = 'lighter';
+	hi_ctx.translate(cx,cy);
+	hi_ctx.lineWidth = 0.0;
+
+	//描画ループ
+	let nx = 0.0;
+	let c  = 0.0;
+	for(let i = 0;i < g_att_pos.length;++i)
+	{
+		const pos = g_att_pos[i];
+		
+		//色を選択します
+		let pal = Math.floor(c) % col.length;
+		c += add_c;
+		
+		hi_ctx.beginPath();
+		hi_ctx.fillStyle = col[pal];
+		
+		let n = Math.abs(noise(t + nx,0,tt) * r_amp);
+		if(n < 1){ n = 1; }
+		nx += add_nx;
+		
+		//点を描画
+		hi_ctx.globalAlpha=1.0-(n/7);
+		hi_ctx.arc(pos.x,pos.y,n,0,TAU,false);
+		hi_ctx.fill();
+	}
+
+	hi_ctx.restore();
+	
+	//ブルーム処理
+	do_bloom(hi_ctx,hi_cv);
+
+	ctx.save();
+	
+	//画面に縮小転送
+	ctx.drawImage(hi_cv,0,0,hi_w,hi_h,0,0,sc_w,sc_h);
+
+/*
+	//フェートイン・アウト
+	const time_ms = g_time - g_start_time;
+	if(time_ms < FADE_TIME)
+	{
+		ctx.globalAlpha = 1.0 - (time_ms / FADE_TIME);
+		ctx.fillStyle = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	else if(time_ms >= (MORPH_TIME - FADE_TIME))
+	{
+		ctx.globalAlpha = (time_ms - (MORPH_TIME - FADE_TIME)) / FADE_TIME;
+		ctx.fillStyle = "#000";
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+*/
+	ctx.restore();
+	
+	if(g_time >= g_next_time)
+	{
+		//if(g_auto_save_cnt++ < 100)
+		//{	save_image();	}
+		
+		//Video録画の停止判定
+		CheckVideoCapture();
+
+		//次の区切り時刻を決めてリセット
+		//
+		// 座標位置の作成に少し時間がかかるので、
+		// ここで現在時刻をリセット
+		//
+		reset();
+		g_time = (new Date).getTime();
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+	}
+	
+	g_cnt++;
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
