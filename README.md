@@ -54,6 +54,7 @@ creative_coding/
 - `lsys2`：[パパのにょきにょき(L-System練習2)](https://voich2014.github.io/creative_coding/src/lsys2/index1.html)
 - `stat`：[パパのストレンジアトラクター](https://voich2014.github.io/creative_coding/src/stat/index1.html)
 - `kirafw`：[パパのキラキラ花火](https://voich2014.github.io/creative_coding/src/kirafw/index2.html)
+- `infkira`：[パパの無限大キラキラ](https://voich2014.github.io/creative_coding/src/infkira/index1.html)
 
 ---
 
