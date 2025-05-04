@@ -56,6 +56,7 @@ creative_coding/
 - `kirafw`：[パパのキラキラ花火](https://voich2014.github.io/creative_coding/src/kirafw/index2.html)
 - `infkira`：[パパの無限大キラキラ](https://voich2014.github.io/creative_coding/src/infkira/index1.html)
 - `sparf`：[パパのキラキラフラワー](https://voich2014.github.io/creative_coding/src/sparf/index1.html)
+- `spir`：[パパの螺旋キラキラ](https://voich2014.github.io/creative_coding/src/spir/index1.html)
 
 ---
 
