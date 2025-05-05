@@ -57,6 +57,7 @@ creative_coding/
 - `infkira`：[パパの無限大キラキラ](https://voich2014.github.io/creative_coding/src/infkira/index1.html)
 - `sparf`：[パパのキラキラフラワー](https://voich2014.github.io/creative_coding/src/sparf/index1.html)
 - `spir`：[パパの螺旋キラキラ](https://voich2014.github.io/creative_coding/src/spir/index1.html)
+- `bez`：[パパのキラキラワームホール](https://voich2014.github.io/creative_coding/src/bez/index1.html)
 
 ---
 
