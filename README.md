@@ -59,6 +59,7 @@ creative_coding/
 - `spir`：[パパの螺旋キラキラ](https://voich2014.github.io/creative_coding/src/spir/index1.html)
 - `bez`：[パパのキラキラワームホール](https://voich2014.github.io/creative_coding/src/bez/index1.html)
 - `bez2`：[パパのキラキラの壺](https://voich2014.github.io/creative_coding/src/bez2/index1.html)
+- `crys`：[パパのキラキラ宝石箱](https://voich2014.github.io/creative_coding/src/crys/index2.html)
 
 ---
 
