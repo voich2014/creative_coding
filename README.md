@@ -61,6 +61,7 @@ creative_coding/
 - `bez2`：[パパのキラキラの壺](https://voich2014.github.io/creative_coding/src/bez2/index1.html)
 - `crys`：[パパのキラキラ宝石箱](https://voich2014.github.io/creative_coding/src/crys/index2.html)
 - `nazo`：[パパの謎のいきものたち](https://voich2014.github.io/creative_coding/src/nazo/index1.html)
+- `nazo2`：[パパの謎のいきものたちver.Walk](https://voich2014.github.io/creative_coding/src/nazo2/index1.html)
 
 ---
 
