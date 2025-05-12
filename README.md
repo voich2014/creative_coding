@@ -63,6 +63,7 @@ creative_coding/
 - `nazo`：[パパの謎のいきものたち](https://voich2014.github.io/creative_coding/src/nazo/index1.html)
 - `nazo2`：[パパの謎のいきものたちver.Walk](https://voich2014.github.io/creative_coding/src/nazo2/index1.html)
 - `warp`：[パパの無限ワープ](https://voich2014.github.io/creative_coding/src/warp/index1.html)
+- `alcube`：[パパのAlphaLineCube](https://voich2014.github.io/creative_coding/src/alcube/index1.html)
 
 ---
 
