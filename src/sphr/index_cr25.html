@@ -1,0 +1,633 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのキラキラ回転水晶v2.5</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモでは、JavaScriptでポイントキラキラアートを描いてみました。
+	
+	今回は、点で描く水晶をさらに回転させて合成しています。
+	v2では、キラキラロープで取り入れた方法を使って、回転を増やしたり
+	微調整を加えています。
+	v2.5ではポイントのキラキラを同期させずにバラバラにしてみたらどうなる
+	かを試しにやってみました。
+	gumo2という作品でバラバラにキラキラさせてたのですが、そちらの方が
+	キラキラ感は増すかも？と思ったので。
+	模様としては同期させた方が綺麗だと思います。
+	
+	
+	Copyright (c) 2021 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.6.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>
+<style type="text/css">
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+const TAU           = 2.0 * Math.PI;
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+let g_bloom_offscs  = [];		//ブルーム処理用オフスクリーンcanvas
+let g_scale         = 1.0;
+
+const MORPH_TIME    = 5000;
+const POINT_NUM     = 120;
+const MIN_S         = 11;
+const MAX_S         = 14;
+const MIN_c         = 0.01;
+const MAX_c         = 0.25;
+const MIN_r_amp     = 1.0;
+const MAX_r_amp     = 3.0;
+const MIN_nx        = 0.01;
+const MAX_nx        = 0.4;
+const MIN_ra        = 2;
+const MAX_ra        = 8;
+const MIN_a         = 0.001;
+const MAX_a         = 0.5;
+const MIN_b         = 0.001;
+const MAX_b         = 0.5;
+const MIN_ob        = 0;
+const MAX_ob        = rad(90);
+const MIN_sr        = 0.5;
+const MAX_sr        = 1.5;
+const MIN_sr_off    = 0.4;
+const MAX_sr_off    = 1.8;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_start_S       = 0;
+let g_next_S        = 0;
+let g_start_c       = 0;
+let g_next_c        = 0;
+let g_start_r_amp   = 0;
+let g_next_r_amp    = 0;
+let g_start_nx      = 0;
+let g_next_nx       = 0;
+let g_start_ra      = 0;
+let g_next_ra       = 0;
+let g_start_a       = 0;
+let g_next_a        = 0;
+let g_start_b       = 0;
+let g_next_b        = 0;
+let g_start_ob      = 0;
+let g_next_ob       = 0;
+let g_start_sr      = 0;
+let g_next_sr       = 0;
+let g_start_sr_off  = 0;
+let g_next_sr_off   = 0;
+
+let g_def1_colors   = [];
+let g_def2_colors   = [];
+let g_start_colors  = [];
+let g_next1_colors  = [];
+let g_next2_colors  = [];
+
+let g_mtx_vp        = new MatrixMan4();
+let g_mtx_scale     = new MatrixMan4();
+let g_mtx_move      = new MatrixMan4();
+let g_mtx_rotateA   = new MatrixMan4();
+let g_mtx_rotateB   = new MatrixMan4();
+let g_mtx_rotateC   = new MatrixMan4();
+let g_mtx_rotateZ   = new MatrixMan4();
+let g_mtx_model     = new MatrixMan4();
+let g_vec_pos       = new VectorMan4();
+
+let g_ry            = 0;
+let g_rz            = 0;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		//PC側ならではの雰囲気にする
+		const       h = 600;
+		g_game_width  = 500 / 320 * h;
+		g_game_height = h;
+		g_scale       = h / 320;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//coolors.co URLからデフォルトパレットを生成
+	const url1    = "https://coolors.co/485696-e7e7e7-f9c784-fc7a1e-f24c00";
+	const url2    = "https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041";
+	g_def1_colors = createPaletteNHSL(url1);
+	g_def2_colors = createPaletteNHSL(url2);
+
+}
+
+function setup_matrix()
+{
+	
+	//射影・ビュー変換行列の準備
+	
+	//射影行列を生成
+	let mtx_projection = new MatrixMan4();
+	mtx_projection.projectionOpenGL(NEAR_Z_POS,FAR_Z_POS,rad(60),g_game_width/g_game_height);
+	
+	//ビュー行列を生成
+	let vFrom    = new VectorMan3(0.0,0.0,100.0);
+	let vTo      = new VectorMan3(0.0,0.0,0.0);
+	let vUp      = new VectorMan3(0.0,1.0,0.0);
+	let mtx_view = new MatrixMan4();
+	mtx_view.view(vFrom,vTo,vUp);
+	
+	//合成行列を作っておく
+	g_mtx_vp.initialize();
+	g_mtx_vp.mul(mtx_view);
+	g_mtx_vp.mul(mtx_projection);
+	
+}
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	let scale = 0.5;
+	for(let i = 0;i < 2;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = sc_w * scale;
+		const cv_h = sc_h * scale;
+		
+		cv.width  = sc_w * scale;
+		cv.height = sc_h * scale;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(ctx,draw_screen)
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 5,10 ];
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(draw_screen,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+blur_w[idx]+"px)";
+		ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		ctx.restore();
+		
+		//draw_screenが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//変換行列の準備
+	setup_matrix();
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	//※1回だとstartの値が不定になるのでreset()を2回呼びます
+	g_next1_colors = g_def1_colors.slice();
+	g_next2_colors = g_def2_colors.slice();
+	reset();
+	reset();
+	
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_S      = g_next_S;
+	g_start_c      = g_next_c;
+	g_start_r_amp  = g_next_r_amp;
+	g_start_nx     = g_next_nx;
+	g_start_ra     = g_next_ra;
+	g_start_a      = g_next_a;
+	g_start_b      = g_next_b;
+	g_start_ob      = g_next_ob;
+	g_start_sr     = g_next_sr;
+	g_start_sr_off = g_next_sr_off;
+	
+	g_next_S       = Math.min(MIN_S     + rnd(MAX_S     *1000)/1000,MAX_S     );
+	g_next_c       = Math.min(MIN_c     + rnd(MAX_c     *1000)/1000,MAX_c     );
+	g_next_r_amp   = Math.min(MIN_r_amp + rnd(MAX_r_amp *1000)/1000,MAX_r_amp );
+	g_next_nx      = Math.min(MIN_nx    + rnd(MAX_nx    *1000)/1000,MAX_nx    );
+	g_next_ra      = Math.floor(Math.min(MIN_ra + rnd(MAX_ra),MAX_ra));
+	g_next_a       = Math.min(MIN_a     + rnd(MAX_a     *1000)/1000,MAX_a     );
+	g_next_b       = Math.min(MIN_b     + rnd(MAX_b     *1000)/1000,MAX_b     );
+	g_next_ob      = Math.min(MIN_ob    + rnd(MAX_ob    *1000)/1000,MAX_ob    );
+	g_next_sr      = Math.min(MIN_sr    + rnd(MAX_sr    *1000)/1000,MAX_sr    );
+	g_next_sr_off  = Math.min(MIN_sr    + rnd(MAX_sr_off*1000)/1000,MAX_sr_off);
+	
+	//パレットを決定
+	g_start_colors = g_next1_colors.slice();	//配列の値渡しコピー
+	g_next1_colors = g_next2_colors.slice();	//配列の値渡しコピー
+	g_next2_colors = g_def1_colors.slice();	//次のパレットの初期値とする
+	getColormind(function(palette)
+	{
+		//Colormindから5色のパレットを取得
+		g_next2_colors = rgbAA2hslNA(palette);		
+	});
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//画面クリア
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const ctx  = g_screen_ctx;
+	ctx.clearRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+
+	//シーンの準備
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e  = Ease.easeInOutExpo(time**8);
+	const ce = Ease.easeInSine(time);
+
+	//毎回の描画でnewをしたくないのと、グローバル変数の
+	//参照をローカル変数に持つと速いという話があったので
+	//高速化と言うか、たまにプチフリーズするのを避ける
+	//つもりで使います。効果があったかどうかは、よく分からないｗ
+	let mtx_vp      = g_mtx_vp;
+	let mtx_scale   = g_mtx_scale;
+	let mtx_move    = g_mtx_move;
+	let mtx_rotateA = g_mtx_rotateA;
+	let mtx_rotateB = g_mtx_rotateB;
+	let mtx_rotateC = g_mtx_rotateC;
+	let mtx_rotateZ = g_mtx_rotateZ;
+	let mtx_model   = g_mtx_model;
+	let vec_pos     = g_vec_pos;
+	
+	//このターンでのパラメータを計算
+	const S         = (g_start_S     + e * (g_next_S      - g_start_S    )) * g_scale;
+	const add_c     = g_start_c      + e * (g_next_c      - g_start_c     );
+	const r_amp     = g_start_r_amp  + e * (g_next_r_amp  - g_start_r_amp );
+	const add_nx    = g_start_nx     + e * (g_next_nx - g_start_nx);
+	const add_ra    = TAU / (g_start_ra + e * (g_next_ra  - g_start_ra));
+	const add_a     = g_start_a      + e * (g_next_a      - g_start_a     );
+	const add_b     = g_start_b      + e * (g_next_b      - g_start_b     );
+	const sr        = g_start_sr     + e * (g_next_sr     - g_start_sr    );
+	const sr_off    = g_start_sr_off + e * (g_next_sr_off - g_start_sr_off);
+	const oa        = g_ry;
+	const ob        = g_start_ob     + e * (g_next_ob     - g_start_ob    );
+	const td        = 500;
+	const t         = g_time / td;
+	const tt        = t / 4;
+	const sc_w2     = sc_w * 0.5;
+	const sc_h2     = sc_h * 0.5;
+	
+	//中心角90度の場合の円の中心から弦までの垂線の長さを計算
+	//
+	// 円の半径を√2とした場合、垂線と弦の半分の長さは1になるので、
+	// 垂線の長さ = 1 / √2 * 半径
+	//
+	const p_len   = 1.0 / Math.sqrt(2) * sr;
+	const p_ratio = p_len / sr;
+	const p2      = Math.PI / 2;
+	const p4      = Math.PI / 4;
+			
+	mtx_scale.scale(S,S,S);
+	mtx_move.translate(0,-sr_off*S,0);
+	
+	mtx_rotateA.rotateZ(oa);
+	mtx_rotateB.rotateX(ob);
+	mtx_rotateZ.rotateZ(g_rz);
+
+	const rt = (g_dtime) / 5000;
+	g_ry += (rt * 3.0);
+	g_rz += (rt * 1.5);
+
+	//高速化のための各種テーブルを準備
+	const colors = [];
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		const col = 
+		{
+			h: SL.mix(g_start_colors[i].h,
+					  g_next1_colors[i].h,ce),
+			s: SL.mix(g_start_colors[i].s,
+					  g_next1_colors[i].s,ce),
+			l: SL.mix(g_start_colors[i].l,
+					  g_next1_colors[i].l,ce)
+		};
+		colors.push(col);
+	}
+	const hls_colors = [];
+	for(let i = 0;i < colors.length;++i)
+	{
+		const col = colors[i];
+		const h   = col.h * 360;
+		const s   = Math.floor(col.s * 100)+"%";
+		const l   = (col.l < 0.90) ? "50%" : (Math.floor(col.l * 100)+"%");
+		hls_colors.push(`hsl(${h},${s},${l})`);
+	}
+	const x = [];
+	const y = [];
+	const z = [];
+	let a   = 0.0;
+	let b   = 0.0;
+	for(let i = 0;i < POINT_NUM;++i)
+	{
+		//角度が0と90度の場合に半径は1.0倍だが、45度の時はp_ratio倍に
+		//なるので、45度を中心に比率を補間して半径を計算
+		const aa        = a % p2;
+		const bb        = b % p2;
+		const sra_ratio = p_ratio + (Math.abs(aa - p4) / p4) * (1.0 - p_ratio);
+		const srb_ratio = p_ratio + (Math.abs(bb - p4) / p4) * (1.0 - p_ratio);
+		const srb       = sr * srb_ratio;
+		const sra       = srb * Math.cos(b) * sra_ratio;
+
+		//点の場所を計算
+		//
+		// この球体を描く計算は、マット・ピアソン 著 [普及版]ジェネラティブ・アート
+		// Processingによる実践ガイドの「5.3.3 球を描く間違った方法」を参考にしてみました。 
+		//
+		x.push(sra * Math.cos(a));
+		y.push(srb * Math.sin(b));
+		z.push(sra * Math.sin(a));
+
+		//球体のための角度を更新
+		a += add_a;
+		b += add_b;
+	}
+	
+	
+	//描画するっす
+	ctx.globalCompositeOperation = 'lighter';
+	ctx.translate(sc_w / 2,sc_h / 2);
+	ctx.lineWidth = 0.0;
+
+	let c   = 0.0;
+	let nx  = 0.0;
+	const tau = TAU - 0.02;	//あとちょっとで重なるのを避ける
+	for(let ra = 0;ra < tau;ra += add_ra)
+	{
+		mtx_rotateC.rotateZ(ra);
+		
+		//変換行列を先に合成しておく
+		mtx_model.copy(mtx_scale);
+		mtx_model.mul(mtx_rotateA);
+		mtx_model.mul(mtx_rotateB);
+		mtx_model.mul(mtx_move);
+		mtx_model.mul(mtx_rotateC);
+		mtx_model.mul(mtx_rotateZ);
+		mtx_model.mul(mtx_vp);
+	
+		for(let i = 0;i < POINT_NUM;++i)
+		{
+			//色を選択します
+			let pal = Math.floor(c) % colors.length;
+			c += add_c;
+			
+			//円のサイズをノイズで決定
+			const n = Math.abs(g_pn.perlin(t + nx,0,tt) * r_amp) * g_scale;
+			nx += add_nx;
+
+			ctx.beginPath();
+			ctx.fillStyle = hls_colors[pal];
+			
+			//座標変換
+			vec_pos.setValue(x[i],y[i],z[i],1.0);
+			vec_pos.mul_matrix(mtx_model);
+			vec_pos.x /= vec_pos.w;
+			vec_pos.y /= vec_pos.w;
+			vec_pos.x *= sc_w2;
+			vec_pos.y *= sc_h2;
+			
+			//点を描画
+			ctx.arc(vec_pos.x,vec_pos.y,n,0,TAU,false);
+			ctx.fill();
+		}
+	}
+	
+	ctx.restore();
+	
+	//ブルーム処理
+	let screen = document.getElementById("game-screen");
+	do_bloom(ctx,screen);
+	
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
