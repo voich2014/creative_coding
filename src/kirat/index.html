@@ -1,0 +1,648 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのキラキラ反射文字</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	
+	このデモは、反射するポイントキラキラアートで文字をかたどって
+	みたものです。
+	
+	おぼろげな感じがなんか良くないですか？(*´ω｀*)
+	
+	ベースはJunKiyoshiさん(@junkiyoshi)の以下の作品をヒントに作りました。
+	ありがとうございます！
+	https://twitter.com/junkiyoshi/status/1293156404656660481?s=20
+
+	JunKiyoshiさんに圧倒的感謝を！
+	
+	
+	Copyright (c) 2021 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.6.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>
+<style type="text/css">
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+const TAU           = 2.0 * Math.PI;
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+let g_bloom_offscs  = [];		//ブルーム処理用オフスクリーンcanvas
+let g_scale         = 1.0;
+
+const MORPH_TIME    = 10000;
+const LINE_NUM      = 70;
+const MOVE_SPEED    = 0.8;
+const MIN_c         = 0.01;
+const MAX_c         = 0.15;
+const MIN_r         = 8.0;
+const MAX_r         = 10.0;
+const MIN_nx        = 0.05;
+const MAX_nx        = 0.8;
+
+let g_pos           = [];
+let g_start_cv      = null;
+let g_start_ctx     = null;
+let g_next_cv       = null;
+let g_next_ctx      = null;
+let g_offsc         = null;
+let g_nextsc        = null;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_start_c       = 0;
+let g_next_c        = 0;
+let g_start_r       = 0;
+let g_next_r        = 0;
+let g_start_nx      = 0;
+let g_next_nx       = 0;
+let g_lasttime      = 0;
+
+let g_def1_colors   = [];
+let g_def2_colors   = [];
+let g_start_colors  = [];
+let g_next1_colors  = [];
+let g_next2_colors  = [];
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 460;
+		g_game_height = 720;
+		g_scale       = g_game_width / 320;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//coolors.co URLからデフォルトパレットを生成
+	const url1    = "https://coolors.co/485696-e7e7e7-f9c784-fc7a1e-f24c00";
+	const url2    = "https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041";
+	g_def1_colors = createPaletteNHSL(url1);
+	g_def2_colors = createPaletteNHSL(url2);
+		
+	//マスク画像用のキャンバスを準備
+	const sc_w  = screen.width;
+	const sc_h  = screen.height;
+	const sc_w2 = sc_w / 2;
+	const sc_h2 = sc_h / 2;
+	
+	g_start_cv  = document.createElement("canvas");
+	g_start_ctx = g_start_cv.getContext("2d");
+	g_next_cv   = document.createElement("canvas");
+	g_next_ctx  = g_next_cv.getContext("2d");
+	
+	g_start_cv.width  = sc_w2;
+	g_start_cv.height = sc_h2;
+	g_next_cv.width   = sc_w2;
+	g_next_cv.height  = sc_h2;
+	
+	//確認用
+	if(0)
+	{
+		g_start_cv.style.display  = "block";
+		g_start_cv.style.position = "absolute";
+		g_start_cv.style.left     = "0px";
+		g_start_cv.style.top      = "0px";
+		g_next_cv.style.display   = "block";
+		g_next_cv.style.position  = "absolute";
+		g_next_cv.style.left      = (sc_w2 + 10) + "px";
+		g_next_cv.style.top       = "0px";
+		
+		document.body.appendChild(g_start_cv);
+		document.body.appendChild(g_next_cv);
+	}
+	
+	//ライン情報を準備
+	for(let i = 0;i < LINE_NUM;++i)
+	{
+		g_pos.push({});
+	}
+	
+}
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	let scale = 0.5;
+	for(let i = 0;i < 2;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = sc_w * scale;
+		const cv_h = sc_h * scale;
+		
+		cv.width  = sc_w * scale;
+		cv.height = sc_h * scale;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(ctx,draw_screen)
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 5,10 ];
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(draw_screen,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+blur_w[idx]+"px)";
+		ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		ctx.restore();
+		
+		//draw_screenが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function reset_pos(info)
+{
+
+	//ラインの初期位置を決定する
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	while(1)
+	{
+		//移動できる部分になるまで繰り返す
+		const x = rnd(sc_w);
+		const y = rnd(sc_h);
+		if(init_pos(info,x,y))
+		{
+			//決定
+			break;
+		}
+	}
+	
+}
+
+function init_pos(info,x,y)
+{
+	
+	//ラインの初期設定
+	const mw = g_start_cv.width;
+	let data = g_offsc.data;
+	let ret  = false;
+	
+	//移動できる場所だったか？
+	const p  = (Math.floor(y / 2) * mw + Math.floor(x / 2)) * 4;
+	if(data[p] >= 128)
+	{
+		//決定
+		info.x  = x;
+		info.y  = y;
+		info.a  = rnd(360);
+		
+		ret = true;
+	}
+	
+	return ret;
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	//※1回だとstartの値が不定になるのでreset()を2回呼びます
+	g_next1_colors = g_def1_colors.slice();
+	g_next2_colors = g_def2_colors.slice();
+	reset();
+	reset();
+	g_offsc = g_start_ctx.getImageData(0,0,g_start_cv.width,g_start_cv.height);
+	for(let i = 0;i < g_pos.length;++i)
+	{	reset_pos(g_pos[i]);	}
+	
+}
+
+function create_text_mask(cv,ctx)
+{
+	
+	//文字のマスク画像を作成
+	
+	//キャンバスのサイズを取得
+	const cv_w = cv.width;
+	const cv_h = cv.height;
+	
+	//黒で塗りつぶす
+	ctx.fillStyle = "black";
+	ctx.fillRect(0,0,cv_w,cv_h);
+	
+	//白い文字を描く
+	const moji = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	const m    = moji.substr(rnd(moji.length),1);
+	ctx.fillStyle    = "white";
+	ctx.textBaseline = "middle";
+	ctx.font = "normal bold "+(cv_h * 0.6)+"px sans-serif";
+	ctx.fillText(m,(cv_w - ctx.measureText(m).width) / 2,cv_h / 2);
+
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_c  = g_next_c;
+	g_start_r  = g_next_r;
+	g_start_nx = g_next_nx;
+	
+	g_next_c   = Math.min(MIN_c  + rnd(MAX_c *1000)/1000,MAX_c );
+	g_next_r   = Math.min(MIN_r  + rnd(MAX_r *1000)/1000,MAX_r );
+	g_next_nx  = Math.min(MIN_nx + rnd(MAX_nx*1000)/1000,MAX_nx);
+	
+	//パレットを決定
+	g_start_colors = g_next1_colors.slice();	//配列の値渡しコピー
+	g_next1_colors = g_next2_colors.slice();	//配列の値渡しコピー
+	g_next2_colors = g_def1_colors.slice();		//次のパレットの初期値とする
+	getColormind(function(palette)
+	{
+		//Colormindから5色のパレットを取得
+		g_next2_colors = rgbAA2hslNA(palette);		
+	});
+
+	//文字マスクを設定
+	g_start_ctx.drawImage(g_next_cv,0,0);
+	create_text_mask(g_next_cv,g_next_ctx);
+	
+	//オフスクリーンデータを更新
+	g_offsc = g_nextsc;
+	setTimeout(function()
+	{
+		//スマホだとgetImageData時にフリーズする場合があるので遅延実行
+		g_nextsc = g_start_ctx.getImageData(0,0,g_start_cv.width,g_start_cv.height);
+	},10);
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;// + " y="+g_y+" z="+g_z+" r="+g_r;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//速すぎると良さが半減するので
+	//あえて15fps未満にする
+	if((g_time - g_lasttime) < 66)
+	{	return;	 }
+	g_lasttime = g_time;
+	
+	//画面クリア
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const ctx  = g_screen_ctx;
+	ctx.clearRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+	ctx.globalCompositeOperation = 'lighter';
+	ctx.lineCap = "round";
+		
+	//シーンの準備
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e    = Ease.easeInExpo(time**8);
+	const ce   = Ease.easeInSine(time);
+	const pn   = Math.max(g_pn.perlin(g_time * 0.0005,0,0),0.0);
+	const dist = Math.max(Math.floor((pn * pn) * 150),1.0);
+
+	//このターンでのパラメータを計算
+	const add_c  = g_start_c  + e * (g_next_c - g_start_c);
+	const r_amp  = g_start_r  + e * (g_next_r  - g_start_r );
+	const add_nx = g_start_nx + e * (g_next_nx - g_start_nx);
+	const td     = 800;
+	const t      = g_time / td;
+	const tt     = t / 4;
+	
+	//高速化のための各種テーブルを準備
+	const colors = [];
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		const col = 
+		{
+			h: SL.mix(g_start_colors[i].h,
+					  g_next1_colors[i].h,ce),
+			s: SL.mix(g_start_colors[i].s,
+					  g_next1_colors[i].s,ce),
+			l: SL.mix(g_start_colors[i].l,
+					  g_next1_colors[i].l,ce)
+		};
+		colors.push(col);
+	}
+	const hls_colors = [];
+	for(let i = 0;i < colors.length;++i)
+	{
+		const col = colors[i];
+		const h   = col.h * 360;
+		const s   = Math.floor(col.s * 100)+"%";
+		const l   = (col.l < 0.90) ? "50%" : (Math.floor(col.l * 100)+"%");
+		hls_colors.push(`hsl(${h},${s},${l})`);
+	}
+	
+	//ラインの移動
+	const mw   = g_start_cv.width;
+	const data = g_offsc.data;
+	let nx     = 0;
+	let c      = 0;
+	for(let i = 0;i < g_pos.length;++i)
+	{
+		const ds = MOVE_SPEED;
+		let pos  = g_pos[i];
+		let sa   = ds * Math.sin(rad(pos.a));
+		let ca   = ds * Math.cos(rad(pos.a));
+		let move = 0;
+		
+		//色を選択します
+		let pal = Math.floor(c) % colors.length;
+		c += add_c;
+		
+		//円のサイズをノイズで決定
+		const n = Math.abs(g_pn.perlin(t + nx,0,tt) * r_amp) * g_scale;
+		nx += add_nx;
+		
+		ctx.save();
+		ctx.lineWidth   = n;
+		ctx.strokeStyle = hls_colors[pal];
+		ctx.beginPath();
+		ctx.moveTo(pos.x,pos.y);
+		for(let j = 0;j < dist;++j)
+		{
+			const nx = pos.x + ca;
+			const ny = pos.y + sa;
+			const p  = (Math.floor(ny * 0.5) * mw + Math.floor(nx * 0.5)) * 4;
+			
+			if(data[p] < 128)
+			{
+				//動けない場所にぶつかった
+				
+				//ここまででいったんラインを引く
+				ctx.lineTo(pos.x,pos.y);
+				ctx.stroke();
+				ctx.moveTo(pos.x,pos.y);
+				
+				//新しい角度を決める
+				pos.a = pos.a - (90 + rnd(180));
+				sa    = ds * Math.sin(rad(pos.a));
+				ca    = ds * Math.cos(rad(pos.a));
+
+				continue;
+			}
+			
+			pos.x = nx;
+			pos.y = ny;
+			move++;
+		}
+		ctx.lineTo(pos.x,pos.y);
+		ctx.stroke();
+		ctx.restore();
+		
+		//1回も移動できなかったら場所をリセット
+		if(move == 0)
+		{
+			reset_pos(pos);
+		}
+	}
+	
+	ctx.restore();
+	
+	//ブルーム処理
+	let screen = document.getElementById("game-screen");
+	do_bloom(ctx,screen);
+	
+	//フェードイン・アウト
+	const dt   = g_time - g_start_time;
+	const fdin = 500;
+	if(dt < fdin)
+	{
+		//フェードイン
+		const fade = 1.0 - dt / fdin;
+		ctx.fillStyle = `rgba(0,0,0,${fade})`;
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	else if(dt > (MORPH_TIME - fdin))
+	{
+		//フェードアウト
+		const fade = 1.0 - (MORPH_TIME - dt) / fdin;
+		ctx.fillStyle = `rgba(0,0,0,${fade})`;
+		ctx.fillRect(0,0,sc_w,sc_h);
+	}
+	
+	//変形終了時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
