@@ -67,6 +67,7 @@ creative_coding/
 - `sphr`：[パパのキラキラ回転水晶v3](https://voich2014.github.io/creative_coding/src/sphr/index_cr3.html)
 - `rope`：[パパのキラキラロープ](https://voich2014.github.io/creative_coding/src/rope/index1.html)
 - `kirat`：[パパのキラキラ反射文字](https://voich2014.github.io/creative_coding/src/kirat/index1.html)
+- `agete`：[パパの無限瑪瑙](https://voich2014.github.io/creative_coding/src/agate/index1.html)
 
 ---
 

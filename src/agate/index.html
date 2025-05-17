@@ -1,0 +1,428 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの無限瑪瑙</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモでは、JavaScriptでどんどん拡大していく模様を描いてみました。
+	
+	イメージは、山田英春さん著の「奇妙で美しい石の世界」に出てくる、
+	縞模様の瑪瑙の断面です。
+	https://www.chikumashobo.co.jp/product/9784480069672/
+	
+	
+	Copyright (c) 2021 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+ 	
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.6.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>
+<style type="text/css">
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+const TAU           = 2.0 * Math.PI;
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+
+const MORPH_TIME    = 10000;
+const OBJ_NUM       = 50;
+const STRIPE_STRIDE = 500;
+const ZOOM_TIME     = 24000;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+
+let g_obj           = [];
+let g_nx            = 0;
+let g_ny            = 0;
+let g_nz            = 0;
+
+let g_def1_colors   = [];
+let g_def2_colors   = [];
+let g_start_colors  = [];
+let g_next1_colors  = [];
+let g_next2_colors  = [];
+let g_colors        = [];
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 600;
+		g_game_height = 600;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//coolors.co URLからデフォルトパレットを生成
+	const url1    = "https://coolors.co/3c1518-69140e-a44200-d58936-fff94f";
+	const url2    = "https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041";
+	g_def1_colors = createPaletteNHSL(url1);
+	g_def2_colors = createPaletteNHSL(url2);
+
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+
+	//最初の値を決める
+	g_next1_colors = g_def1_colors.slice();
+	g_next2_colors = g_def2_colors.slice();
+	g_colors       = g_def1_colors.slice();
+	reset();
+	
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	//パレットを決定
+	g_start_colors = g_next1_colors.slice();	//配列の値渡しコピー
+	g_next1_colors = g_next2_colors.slice();	//配列の値渡しコピー
+	g_next2_colors = g_def1_colors.slice();		//次のパレットの初期値とする
+	getColormind(function(palette)
+	{
+		//Colormindから5色のパレットを取得
+		g_next2_colors = rgbAA2hslNA(palette);		
+	});
+	
+}
+
+function init_obj()
+{
+	
+	//縞模様オブジェクトの初期化
+	
+	//クリア
+	g_obj = [];
+	
+	//開始時刻の準備
+	let start_time = g_time - STRIPE_STRIDE * OBJ_NUM;
+	
+	g_nx = start_time;
+	g_ny = start_time;
+	g_nz = start_time;
+	
+	//すべてのオブジェクト情報を埋める
+	for(let i = 0;i < OBJ_NUM;++i)
+	{
+		g_obj.push(create_obj(start_time));
+		start_time += STRIPE_STRIDE;
+	}
+	
+}
+
+function create_obj(start_time)
+{
+	
+	//縞模様オブジェクト情報の生成
+	
+	const idx = Math.floor(start_time / STRIPE_STRIDE);
+	const col = g_colors[idx % g_colors.length];
+	const h   = col.h * 360;
+	const s   = Math.floor(col.s * 100)+"%";
+	const l   = Math.floor(col.l * 100)+"%";
+	const hsl = `hsl(${h},${s},${l})`;
+	
+	g_nx += rnd(10) / 500;
+	g_ny += rnd(5)  / 10000;
+	g_nz += rnd(5)  / 10000;
+	
+	const info =
+	{
+		start_time: start_time,
+		end_time  : start_time + ZOOM_TIME + rnd(300),
+		nx        : g_nx,
+		ny        : g_ny,
+		nz        : g_nz,
+		a_step    : 0.05 + rnd(10) / 80,
+		color     : hsl,
+	}
+	
+	return info;
+	
+}
+
+function update_obj()
+{
+
+	//縞模様オブジェクト情報の更新
+	
+	let need_sort = false;
+	for(let i = 0;i < g_obj.length;++i)
+	{
+		//十分に時間が経った場合にリセット
+		const info = g_obj[i];
+		if(info.end_time <= g_time)
+		{
+			g_obj[i]  = create_obj(info.end_time);
+			need_sort = true;
+		}
+	}
+	
+	//古い時刻のものから描画するようにソート
+	if(need_sort)
+	{
+		g_obj.sort(function(a,b){
+			if(a.start_time < b.start_time) return -1;
+			if(a.start_time > b.start_time) return  1;
+			return 0;
+		});
+	}
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+		
+		//オブジェクトの初期化
+		init_obj();
+	}
+	
+	//色の準備
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const ce = Ease.easeInSine(time);
+	
+	g_colors = [];
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		const col = 
+		{
+			h: SL.mix(g_start_colors[i].h,
+					  g_next1_colors[i].h,ce),
+			s: SL.mix(g_start_colors[i].s,
+					  g_next1_colors[i].s,ce),
+			l: SL.mix(g_start_colors[i].l,
+					  g_next1_colors[i].l,ce)
+		};
+		g_colors.push(col);
+	}
+
+	//画面クリア
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	const ctx  = g_screen_ctx;
+	ctx.clearRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+	
+	ctx.translate(sc_w / 2,sc_h / 2);
+	
+	//縞模様オブジェクトの描画
+	for(let i = 0;i < g_obj.length;++i)
+	{
+		const info = g_obj[i];
+		
+		const t   = (g_time - info.start_time) / 5000;
+		const len = 300;
+				
+		ctx.fillStyle = info.color;
+		ctx.beginPath();
+		for(let a = 0;a < TAU;a += info.a_step)
+		{
+			const n = Math.max(g_pn.perlin(Math.cos(a),Math.sin(a),info.nx),0.6);
+			const r = len * t * g_pn.perlin(n,info.ny,info.nz);
+			const x = r * Math.cos(a);
+			const y = r * Math.sin(a);
+			
+			if(a == 0)
+			{	ctx.moveTo(x,y);	}
+			else
+			{	ctx.lineTo(x,y);	}
+		}
+		ctx.closePath();
+		ctx.fill();
+	}
+	
+	ctx.restore();
+	
+	//縞模様オブジェクト情報の更新
+	update_obj();
+	
+	//色変更時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
