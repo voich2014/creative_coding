@@ -1,0 +1,282 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのバラ曲線</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモは、バラ曲線をJavaScriptのCanvasで描画します。
+	
+	バラ曲線(Wikipedia)
+	https://ja.wikipedia.org/wiki/%E3%83%90%E3%83%A9%E6%9B%B2%E7%B7%9A
+	https://en.wikipedia.org/wiki/Rose_(mathematics)
+
+	今回は、ayatoさん(@dn0t_)の作品を真似っ子させて頂きました！
+	https://twitter.com/dn0t_/status/1303664459139829762?s=20
+	
+	ayatoさんに圧倒的感謝を！
+	
+	Copyright (c) 2020 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.0.0.js"></script>
+<!--<script type="text/javascript" src="./../vlib/vl_3d_v1.0.0.js"></script>-->
+
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 320;
+
+let g_time   = 0;			//現在時刻[ms]
+let g_dtime  = 0;			//前回の描画からの経過時間[ms]
+
+let g_screen_ctx    = null;
+let g_start_time    = 0;
+let g_next_time     = 0;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 512;
+		g_game_height = 512;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+	//最初にアルファ値が255になるように埋める
+	g_offsc.data.fill(255);
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+//Processing互換メソッド
+const TAU = 2.0 * Math.PI;
+
+function stroke(c)
+{
+	g_screen_ctx.strokeStyle = `rgb(${c},${c},${c})`;
+}
+
+function background(gray)
+{
+	g_screen_ctx.save();
+	g_screen_ctx.fillStyle = `rgb(${gray},${gray},${gray})`;
+	g_screen_ctx.fillRect(0,0,g_game_width,g_game_height);
+	g_screen_ctx.restore();
+}
+
+function push()
+{
+	g_screen_ctx.save();
+	g_screen_ctx.beginPath();
+}
+
+function pop()
+{
+	g_screen_ctx.restore();
+}
+
+function translate(x,y)
+{
+	g_screen_ctx.translate(x,y);
+}
+
+function point(x,y,z)
+{
+	//zはひとまず無視
+	g_screen_ctx.moveTo(x,y);
+	g_screen_ctx.lineTo(x+0.01,y+0.01);
+	g_screen_ctx.stroke();
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+	}
+	
+	//ayatoさんのつぶやきProcessingのコードを分解して写経
+	stroke(255);
+	const c = Math.cos;
+	const S = g_game_width;
+	
+	background(8);
+	
+	const V = S / 7;
+	const t = g_time / 2000;
+	const s = S / 800;		//元ソースのCanvasに合わせて
+	const d = 18 * s;		//半径の比率を調整
+	let k;
+
+	for(let i = 0;(i++) < 6;)
+	{
+		for(let j = 0;(j++) < 6;)
+		{
+			push();
+			translate(i * V,j * V);
+			const r = d * (2 + c((i + j) * t - j));
+			stroke(r * 12);
+			for(let l = 0;(l += 0.03) < TAU;)
+			{
+				point(r * c(i * l) * c(k = l - t),
+					  r * c(j * l) * Math.sin(k),
+					  9);
+			}
+			pop();
+		}
+	}
+
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>

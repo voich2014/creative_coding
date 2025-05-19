@@ -68,6 +68,7 @@ creative_coding/
 - `rope`：[パパのキラキラロープ](https://voich2014.github.io/creative_coding/src/rope/index1.html)
 - `kirat`：[パパのキラキラ反射文字](https://voich2014.github.io/creative_coding/src/kirat/index1.html)
 - `agete`：[パパの無限瑪瑙](https://voich2014.github.io/creative_coding/src/agate/index1.html)
+- `rose`：[パパのkawaiiバラ曲線](https://voich2014.github.io/creative_coding/src/rose/index4.html)
 
 ---
 
