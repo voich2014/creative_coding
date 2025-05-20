@@ -1,0 +1,836 @@
+const SC_W          = 512;
+const SC_H          = 512;
+const FRAME_RATE    = 60;
+const MORPH_TIME    = 7000;
+const POINT_NUM     = 80;
+const MIN_S         = 18 * 1.2;
+const MAX_S         = 32 * 1.2;
+const MIN_a         = 2;
+const MAX_a         = 7;
+const MIN_c         = 0.01;
+const MAX_c         = 0.15;
+const MIN_al        = 0.001;
+const MAX_al        = 0.100;
+const MIN_si        = 0.001;
+const MAX_si        = 0.100;
+const MIN_mu        = -1.000;
+const MAX_mu        =  1.000;
+const MIN_r         = 1.4 * 3.1;
+const MAX_r         = 5.5 * 3.1;
+const MIN_nx        = 0.01;
+const MAX_nx        = 0.2;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_start_S       = 0;
+let g_next_S        = 0;
+let g_start_a       = 0;
+let g_next_a        = 0;
+let g_start_c       = 0;
+let g_next_c        = 0;
+let g_start_al      = 0;
+let g_next_al       = 0;
+let g_start_si      = 0;
+let g_next_si       = 0;
+let g_start_mu      = 0;
+let g_next_mu       = 0;
+let g_start_r       = 0;
+let g_next_r        = 0;
+let g_start_nx      = 0;
+let g_next_nx       = 0;
+
+let g_stack_colors  = [];
+let g_start_colors  = [];
+let g_next_colors   = [];
+
+let g_canvas        = null;		//メインCanvas
+let g_bloom_offscs  = [];		//ブルーム処理用オフスクリーンcanvas
+
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	
+	let scale = 0.5;
+	let blur_w = [ 5,14 ];
+	for(let i = 0;i < blur_w.length;++i)
+	{
+		const cv_w = SC_W * scale;
+		const cv_h = SC_H * scale;
+		const cv   = createGraphics(cv_w,cv_h);
+		const ctx  = cv.drawingContext;
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx, blur_w: blur_w[i]
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom()
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	const ctx = drawingContext;
+	const cv  = g_canvas;
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.cv.clear();
+		offsc.cv.image(cv,0,0,offsc.cv_w,offsc.cv_h,0,0,SC_W,SC_H);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+offsc.blur_w+"px)";
+		cv.image(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,SC_W,SC_H);
+		ctx.restore();
+	}
+}
+
+function setup() 
+{
+	g_canvas = createCanvas(SC_W, SC_H);
+	frameRate(FRAME_RATE);
+	noStroke();
+	blendMode(LIGHTEST);
+ 	angleMode(RADIANS);
+	
+	//coolors.co URLからパレットを取得しておく
+	const urls = 
+	[
+		"https://coolors.co/485696-e7e7e7-f9c784-fc7a1e-f24c00",
+		"https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041",
+		"https://coolors.co/0f0a0a-f5efed-2292a4-bdbf09-d96c06",
+		"https://coolors.co/ebf5df-bad4aa-d4d4aa-edb458-e8871e",
+		"https://coolors.co/ebf5df-bad4aa-d4d4aa-edb458-e8871e",
+		"https://coolors.co/541388-d90368-f1e9da-2e294e-ffd400",
+		"https://coolors.co/a9b18f-cb807d-fe64a3-f6839c-f0b5b3",
+		"https://coolors.co/d8a47f-ef8354-ee4b6a-df3b57-0f7173",
+		"https://coolors.co/182825-016fb9-22aed1-6d8ea0-afa98d",
+		"https://coolors.co/1e212b-4d8b31-ffc800-ff8427-ffffff",
+		
+		"https://coolors.co/9046cf-cc59d2-f487b6-fff3f0-fde12d",
+		"https://coolors.co/ffe74c-ff5964-ffffff-6bf178-35a7ff",
+		"https://coolors.co/d4c5e2-c9d7f8-a7e2e3-80cfa9-4c6663",
+		"https://coolors.co/db995a-654236-d6d4a0-da7635-e24e1b",
+		"https://coolors.co/0a0903-ff0000-ff8200-ffc100-ffeaae",
+		"https://coolors.co/156064-00c49a-f8e16c-ffc2b4-fb8f67",
+		"https://coolors.co/fffd82-ff9b71-e84855-b56b45-2b3a67",
+		"https://coolors.co/cce8cc-f6efee-e2b6cf-e396df-e365c1",
+		"https://coolors.co/1b2f33-28502e-47682c-8c7051-ef3054",
+		"https://coolors.co/a62639-db324d-56494e-a29c9b-511c29",
+		
+		"https://coolors.co/78c0e0-449dd1-192bc2-150578-0e0e52",
+		"https://coolors.co/fe938c-edaf97-c49792-ad91a3-9d91a3",
+		"https://coolors.co/870058-a4303f-f2d0a4-ffeccc-c8d6af",
+		"https://coolors.co/e1d89f-cd8b76-c45baa-7d387d-27474e",
+		"https://coolors.co/33658a-86bbd8-758e4f-f6ae2d-f26419",
+		"https://coolors.co/bdc667-77966d-626d58-544343-56282d",
+		"https://coolors.co/eccbd9-e1eff6-97d2fb-83bcff-80ffe8",
+		"https://coolors.co/848c8e-435058-dcf763-bfb7b6-f1f2ee",
+		"https://coolors.co/363537-ef2d56-ed7d3a-8cd867-2fbf71",
+		"https://coolors.co/fc9f5b-fbd1a2-ece4b7-7dcfb6-33ca7f",
+		
+		"https://coolors.co/9b1d20-3d2b3d-635d5c-cbefb6-d0ffce",
+		"https://coolors.co/d0b8ac-f3d8c7-efe5dc-fbfefb-ffffff",
+		"https://coolors.co/5dd9c1-acfcd9-b084cc-665687-190933",
+		"https://coolors.co/a20021-f52f57-f79d5c-f3752b-ededf4",
+		"https://coolors.co/160f29-246a73-368f8b-f3dfc1-ddbea8",
+		"https://coolors.co/818479-b5cbb7-d2e4c4-e4e9b2-e7e08b",
+		"https://coolors.co/818479-b5cbb7-d2e4c4-e4e9b2-e7e08b",
+		"https://coolors.co/4d9de0-e15554-e1bc29-3bb273-7768ae",
+		"https://coolors.co/efbdeb-b68cb8-6461a0-314cb6-0a81d1",
+		"https://coolors.co/494947-35ff69-44ccff-7494ea-d138bf",
+		
+		"https://coolors.co/db995a-654236-d6d4a0-da7635-e24e1b",
+		"https://coolors.co/3891a6-4c5b5c-fde74c-db5461-e3655b",
+		"https://coolors.co/087e8b-ff5a5f-3c3c3c-f5f5f5-c1839f",
+		"https://coolors.co/f5cce8-ec9ded-c880b7-9f6ba0-4a2040",
+		"https://coolors.co/69fff1-63d471-63a46c-6a7152-233329",
+		"https://coolors.co/93b5c6-ddedaa-f0cf65-d7816a-bd4f6c",
+		"https://coolors.co/de6b48-e5b181-f4b9b2-daedbd-7dbbc3",
+		"https://coolors.co/de6b48-e5b181-f4b9b2-daedbd-7dbbc3",
+		"https://coolors.co/f7c1bb-885a5a-353a47-84b082-dc136c",
+		"https://coolors.co/404e5c-4f6272-b7c3f3-dd7596-cf1259"
+	];
+	for(let i = 0;i < urls.length;++i)
+	{
+		g_stack_colors.push(createPaletteNHSL(urls[i]));
+	}
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	//※1回だとstartの値が不定になるのでreset()を2回呼びます
+	reset();
+	reset();
+	
+}
+
+function reset() 
+{
+	//次の目標値を決める
+	
+	g_start_S  = g_next_S;
+	g_start_a  = g_next_a;
+	g_start_c  = g_next_c;
+	g_start_al = g_next_al;
+	g_start_si = g_next_si;
+	g_start_mu = g_next_mu;
+	g_start_r  = g_next_r;
+	g_start_nx = g_next_nx;
+	
+	g_next_S   = random(MIN_S *1000,MAX_S *1000)/1000;
+	g_next_a   = random(MIN_a      ,MAX_a      );
+	g_next_c   = random(MIN_c *1000,MAX_c *1000)/1000;
+	g_next_al  = random(MIN_al*1000,MAX_al*1000)/1000;
+	g_next_si  = random(MIN_si*1000,MAX_si*1000)/1000;
+	g_next_mu  = random(0,(MAX_mu - MIN_mu)*10000)/10000+ MIN_mu;
+	g_next_r   = random(MIN_r *1000,MAX_r *1000)/1000;
+	g_next_nx  = random(MIN_nx*1000,MAX_nx*1000)/1000;
+	
+	//パレットを決定
+	g_start_colors = g_next_colors.slice();	//配列の値渡しコピー
+	g_next_colors  = shuffle(g_stack_colors[floor(random(0,g_stack_colors.length-1))]);	//シャッフルしてクローンをコピー
+  
+}
+
+function draw() 
+{
+  
+	//開始時刻保存
+	const g_time = (new Date).getTime();//frameCount * 1000 / FRAME_RATE;
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+  
+	//画面クリア
+	clear();
+	background(0);
+  
+	push();
+  
+	//シーンの準備
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e  = easeInOutExpo(time**10);
+	const ce = easeInSine(time);
+	
+	let mtx_scale   = new MatrixMan3();
+	let mtx_rotateZ = new MatrixMan3();
+	let mtx_model   = new MatrixMan3();
+	let vec_pos     = new VectorMan2();
+
+	//このターンでのパラメータを計算
+	const S         = (g_start_S + e * (g_next_S - g_start_S));
+	const add_a     = round(Math.PI / (g_start_a + e * (g_next_a - g_start_a)),4);
+	const add_c     = g_start_c  + e * (g_next_c - g_start_c);
+	const al        = g_start_al + e * (g_next_al - g_start_al);
+	const si        = g_start_si + e * (g_next_si - g_start_si);
+	const mu        = g_start_mu + e * (g_next_mu - g_start_mu);
+	const mu2       = 2.0 * (1.0 - mu);
+	const r_amp     = g_start_r  + e * (g_next_r  - g_start_r );
+	const add_nx    = g_start_nx + e * (g_next_nx - g_start_nx);
+	const td        = 800;
+	const t         = g_time / td;
+	const tt        = t / 4;
+	const ta        = t / 10;
+	
+	//高速化のための各種テーブルを準備
+	let colors = [];
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		const col = 
+		{
+			h: lerp(g_start_colors[i].h,
+					g_next_colors[i].h,e),
+			s: lerp(g_start_colors[i].s,
+					g_next_colors[i].s,e),
+			l: lerp(g_start_colors[i].l,
+					g_next_colors[i].l,e)
+		};
+		colors.push(col);
+	}
+	const rgb_colors = [];
+	for(let i = 0;i < colors.length;++i)
+	{
+		const col = colors[i];
+		const h   = col.h * 360;
+		const s   = col.s;
+		const l   = (col.l < 0.90) ? 0.5 : col.l;
+		const rgb = hsl2rgb(h,s,l);
+		rgb_colors.push(color(rgb.r*255,rgb.g*255,rgb.b*255));
+	}
+	
+	//フェードイン・フェードアウト
+	let fadeAlpha = 0.0;
+	if(time < 0.1)
+	{
+		fadeAlpha = time / 0.1;
+	}
+	else if(time > 0.92)
+	{	
+		fadeAlpha = 0.0;
+	}
+	else if(time > 0.7)
+	{
+		fadeAlpha = 1.0 - (time - 0.7) / 0.3;
+		fadeAlpha = fadeAlpha**2;
+	}
+	else
+	{	
+		fadeAlpha = 1.0;
+	}
+	fadeAlpha = clamp(fadeAlpha,0.0,1.0);
+	drawingContext.globalAlpha = fadeAlpha;
+	
+	
+	//描画開始
+	translate(SC_W / 2,SC_H / 2);
+	
+	mtx_scale.scale(S,S);
+	
+  	let nx = 0;
+	let c  = 0;
+	for(let a = 0;a < TAU;a += add_a)
+	{
+		mtx_rotateZ.rotateZ(a + ta);
+		
+		let lx = 0;
+		let ly = 0;
+		for(let i = 0;i < POINT_NUM;++i)
+		{
+			//色を選択します
+			let pal = floor(c) % colors.length;
+			c += add_c;
+			
+			fill(rgb_colors[pal]);
+			
+			//円のサイズをノイズで決定
+			const n = noise(t + nx,0,tt) * r_amp;
+			nx += add_nx;
+			
+			//移動行列作成
+			//
+			// グモウスキー・ミラの写像
+			//
+			// Wikipediaで紹介されている、f2とg1が組み合わされた方の
+			// 式を利用します。
+			// https://ja.wikipedia.org/wiki/%E3%82%B0%E3%83%A2%E3%82%A6%E3%82%B9%E3%82%AD%E3%83%BC%E3%83%BB%E3%83%9F%E3%83%A9%E3%81%AE%E5%86%99%E5%83%8F
+			//
+			const lx2 = lx * lx;
+			const ly2 = ly * ly;
+			const x   = ly + al * ly * (1.0 - si * ly2) + mu * lx + ((mu2 + lx2) / (1.0 + lx2));
+			const x2  = x * x;
+			const y   = -lx + mu * x + ((mu2 * x2) / (1.0 + x2));
+			lx = x;
+			ly = y;
+			vec_pos.setValue(x,-y);
+
+			//高速化のため拡大と回転行列を必要最低限の計算で合成します
+			mtx_model.copy(mtx_scale);
+			
+			const _00 = mtx_model.m[0] * mtx_rotateZ.m[0];
+			const _01 = mtx_model.m[0] * mtx_rotateZ.m[1];
+			const _10 = mtx_model.m[3] * mtx_rotateZ.m[0] + mtx_model.m[4] * mtx_rotateZ.m[3];
+			const _11 = mtx_model.m[3] * mtx_rotateZ.m[1] + mtx_model.m[4] * mtx_rotateZ.m[4];
+			const _20 = mtx_model.m[6] * mtx_rotateZ.m[0] + mtx_model.m[7] * mtx_rotateZ.m[3];
+			const _21 = mtx_model.m[6] * mtx_rotateZ.m[1] + mtx_model.m[7] * mtx_rotateZ.m[4];
+
+			mtx_model.m[0] = _00; mtx_model.m[1] = _01; 
+			mtx_model.m[3] = _10; mtx_model.m[4] = _11;
+			mtx_model.m[6] = _20; mtx_model.m[7] = _21;
+
+			//座標変換
+			vec_pos.mul_matrix(mtx_model);
+			
+			//円を描画
+			ellipse(vec_pos.x,vec_pos.y,n);
+		}
+	}
+	
+	pop();
+	
+	//ブルーム処理
+	do_bloom();
+	
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+
+}
+
+
+
+//
+// 以下は自作ライブラリ群
+//
+
+function clamp(x,a,b)
+{
+	return max(a,min(b,x));
+}
+
+//
+// 以下の、 https://coolors.co/ で作成した色見本から、パレット配列を
+// 生成するコードは、takawo shunsukeさん(@takawo)の作品からお借りしました。
+//
+function createPaletteNHSL(_url) 
+{
+	//coolors.co のURLから正規化されたHSLオブジェクト配列にします
+	let slash_index = _url.lastIndexOf('/');
+	let pallate_str = _url.slice(slash_index + 1);
+	let arr = pallate_str.split('-');
+	let col = [];
+	for(let i = 0; i < arr.length; i++)
+	{
+		const r = parseInt(arr[i].substr(0, 2), 16);
+		const g = parseInt(arr[i].substr(2, 2), 16);
+		const b = parseInt(arr[i].substr(4, 2), 16);
+		col.push(rgb2hsl(r, g, b));
+	}
+	return col;
+}
+
+function hsl2rgb(h,s,l)
+{
+	//HSLからRGBに変換
+	//
+	//  h(hue)       : 色相  0-359の値[度]
+	//  s(saturation): 彩度  0-1.0の値[%]
+	//  l(lightness) : 明度  0-1.0の値[%]
+	//
+	let max,min;
+	let r,g,b;
+	
+	//念のためHを補正
+	h = h % 360;
+
+	if(l < 0.5)
+	{
+		max = 255 * (l + l * (s / 1.0));
+		min  = 255 * (l - l * (s / 1.0));
+	}
+	else
+	{
+		max = 255 * (l + (1.0 - l) * (s / 1.0));
+		min = 255 * (l - (1.0 - l) * (s / 1.0)); 
+	}
+	 
+	if(h < 60)
+	{
+		r = max;
+		g = min + (max - min) * (h / 60);
+		b = min;
+	}
+	else if((h >= 60) && (h < 120))
+	{
+		r = min + (max - min) * ((120 - h) / 60);
+		g = max;
+		b = min;
+	 }
+	 else if((h >= 120) && (h < 180))
+	 {
+		r = min;
+		g = max;
+		b = min + (max - min) * ((h - 120) / 60);        
+	}
+	else if((h >= 180) && (h < 240))
+	{
+		r = min;
+		g = min + (max - min) * ((240 - h) / 60);
+		b = max;
+	}
+	else if((h >= 240) && (h < 300))
+	{
+		r = min + (max - min) * ((h - 240) / 60);
+		g = min;
+		b = max;
+	}
+	else if((h >= 300) && (h < 360))
+	{
+		r = max;
+		g = min;
+		b = min + (max - min) * ((360 - h) / 60); 
+	}
+
+	r =  Math.round(r);
+	g =  Math.round(g);
+	b =  Math.round(b);
+	
+	return { r:r/255, g: g/255, b: b/255 };
+}
+
+//
+// こちらのサイトのサンプルコードを参考に実装しました。
+// https://lab.syncer.jp/Web/JavaScript/Snippet/68/
+//
+function rgb2hsl(r, g, b) 
+{
+
+	//RGB値(それぞれ0～255)からHSLに変換します
+	//
+	// { h:0.0～1.0, s:0.0～1.0, l:0.0～1.0 }
+	//
+	// を返します。
+	//
+
+	r = r / 255;
+	g = g / 255;
+	b = b / 255;
+
+	const max  = Math.max(r, g, b);
+	const min  = Math.min(r, g, b);
+	const diff = max - min;
+
+	let h = 0.0;
+	let l = (max + min) / 2.0;
+	let s = diff / (1.0 - (Math.abs(max + min - 1.0)));
+
+	switch (min) {
+	case max:
+		h = 0.0;
+		break;
+
+	case r:
+		h = (60 * ((b - g) / diff)) + 180;
+		break;
+
+	case g:
+		h = (60 * ((r - b) / diff)) + 300;
+		break;
+
+	case b:
+		h = (60 * ((g - r) / diff)) + 60;
+		break;
+	}
+
+	return { h: h / 360.0, s: s, l: l };
+
+}
+
+function easeInOutExpo(x)
+{
+	return (x === 0) ? 0
+			: ((x === 1) ? 1
+			: ((x < 0.5) ? (pow(2, 20 * x - 10) / 2)
+			    : ((2 - pow(2, -20 * x + 10)) / 2)
+			  )
+			);
+}
+
+function easeInSine(x)
+{
+	return 1 - cos((x * Math.PI) / 2);
+}
+
+//2次元ベクトル管理人
+//※とりあえず必要最低限だけ実装。あとは必要になったら…
+class VectorMan2
+{
+	//コンストラクタ
+	constructor(x = 0,y = 0)
+	{
+		//プロパティの初期化
+		this.setValue(x,y);
+	}
+	
+	//値の一括セット
+	setValue(x,y)
+	{
+		this.x = x;
+		this.y = y;
+	}
+	
+	//コピー
+	copy(v2)
+	{
+		this.x = v2.x;
+		this.y = v2.y;
+	}
+	
+	//単位ベクトルに変換
+	normalize()
+	{
+		//単位ベクトルとは、長さが1のベクトルのこと
+		//なので、各値を長さで割ってベクトルの長さが1
+		//になるようにする
+		const x   = this.x;
+		const y   = this.y;
+		let len   = Math.sqrt(x*x + y*y);
+		
+		if(len != 0)
+		{
+			len = 1.0 / len;
+			this.x *= len;
+			this.y *= len;
+		}
+	}
+	
+	//ベクトルを反転する
+	invert()
+	{
+		this.x = -this.x;
+		this.y = -this.y;
+	}
+
+	//ベクトル同士の四則演算
+	add(v2)
+	{
+		this.x += v2.x;
+		this.y += v2.y;
+	
+		return this;
+	}
+	
+	sub(v2)
+	{
+		this.x -= v2.x;
+		this.y -= v2.y;
+	
+		return this;
+	}
+	
+	mul(v2)
+	{
+		this.x *= v2.x;
+		this.y *= v2.y;
+	
+		return this;
+	}
+	
+	div(v2)
+	{
+		this.x /= v2.x;
+		this.y /= v2.y;
+	
+		return this;
+	}
+	
+	mul_matrix(m3)
+	{
+		//列優先での掛け算		
+		
+		//
+		// m3の中のデータ列(列優先のデータ順)
+		//
+		// [0]:m00 [3]:m01 [6]:m02
+		// [1]:m10 [4]:m11 [7]:m12
+		// [2]:m20 [5]:m21 [8]:m22
+		//
+		const xx = m3.m[ 0] * this.x + m3.m[ 3] * this.y + m3.m[6];
+		const yy = m3.m[ 1] * this.x + m3.m[ 4] * this.y + m3.m[7];
+		
+		this.x = xx;
+		this.y = yy;
+		
+		return this;
+	}
+	
+	//1次元配列で2次元ベクトルを返す
+	exportSingleArray()
+	{
+		return [ this.x, this.y ];
+	}
+}
+
+//3次元行列管理人
+//※とりあえず必要最低限だけ実装。あとは必要になったら…
+class MatrixMan3
+{
+	//コンストラクタ
+	constructor()
+	{
+		//列優先データ順で格納します
+		//
+		// [0]:m00 [3]:m01 [6]:m02
+		// [1]:m10 [4]:m11 [7]:m12
+		// [2]:m20 [5]:m21 [8]:m22
+		//
+		
+		this.m = new Float32Array(9);
+		
+		//単位行列で初期化しておく
+		this.initialize();
+	}
+	
+	//コピー
+	copy(m3)
+	{
+		this.m.set(m3.m);
+	}
+
+	//単位行列で初期化
+	initialize()
+	{
+		//単位行列とはこういうもの
+		//| 1 0 0 |
+		//| 0 1 0 |
+		//| 0 0 1 |
+		
+		this.m[0] = 1.0; this.m[3] = 0.0; this.m[6] = 0.0;
+		this.m[1] = 0.0; this.m[4] = 1.0; this.m[7] = 0.0;
+		this.m[2] = 0.0; this.m[5] = 0.0; this.m[8] = 1.0;
+	}
+
+	//スケール変換行列の作成
+	scale(sx,sy)
+	{
+		//スケール変換行列とはこういうもの
+		//sx,syはそれぞれの軸での拡大率
+		//| sx  0  0  |
+		//|  0 sy  0  |
+		//|  0  0  1  |
+
+		this.m[0] = sx;  this.m[3] = 0.0; this.m[6] = 0.0;
+		this.m[1] = 0.0; this.m[4] = sy;  this.m[7] = 0.0;
+		this.m[2] = 0.0; this.m[5] = 0.0; this.m[8] = 1.0; 
+	}
+	
+	//X軸回転行列の作成(rはラジアン単位)
+	rotateX(r)
+	{
+		const sinX = Math.sin(r);
+		const cosX = Math.cos(r);
+		
+		//X軸回転行列とはこういうもの(列優先での配置)
+		//| 1    0     0 |
+		//| 0 cosX -sinX |
+		//| 0 sinX  cosX |
+		
+		this.m[0] = 1.0; this.m[3] =  0.0; this.m[6] =   0.0;
+		this.m[1] = 0.0; this.m[4] = cosX; this.m[7] = -sinX;
+		this.m[2] = 0.0; this.m[5] = sinX; this.m[8] =  cosX;
+	}
+	
+	//Y軸回転行列の作成(rはラジアン単位)
+	rotateY(r)
+	{
+		const sinY = Math.sin(r);
+		const cosY = Math.cos(r);
+
+		//Ｙ軸回転行列とはこういうもの(列優先での配置)
+		//|  cosY   0 sinY |
+		//|     0   1    0 |
+		//| -sinY   0 cosY |
+		
+		this.m[0] =  cosY; this.m[3] = 0.0; this.m[6] = sinY;
+		this.m[1] =   0.0; this.m[4] = 1.0; this.m[7] =  0.0;
+		this.m[2] = -sinY; this.m[5] = 0.0; this.m[8] = cosY;
+	}
+	
+	//Z軸回転行列の作成(rはラジアン単位)
+	rotateZ(r)
+	{
+		const sinZ = Math.sin(r);
+		const cosZ = Math.cos(r);	
+
+		//Ｚ軸回転行列とはこういうもの(列優先での配置)
+		//| cosZ -sinZ   0 |
+		//| sinZ  cosZ   0 |
+		//|    0     0   1 |
+		
+		this.m[0] = cosZ; this.m[3] = -sinZ; this.m[6] = 0.0;
+		this.m[1] = sinZ; this.m[4] =  cosZ; this.m[7] = 0.0;
+		this.m[2] =  0.0; this.m[5] =   0.0; this.m[8] = 1.0;
+	}
+	
+	//平行移動行列の作成
+	translate(tx,ty)
+	{
+		//平行移動行列とはこういうもの(列優先での配置)
+		//|  1  0 tx |
+		//|  0  1 ty |
+		//|  0  0  1 |
+		
+		this.m[0] = 1.0; this.m[3] = 0.0; this.m[6] = tx;
+		this.m[1] = 0.0; this.m[4] = 1.0; this.m[7] = ty;
+		this.m[2] = 0.0; this.m[5] = 0.0; this.m[8] = 1.0;
+	}
+
+	//行列同士の足し算
+	add(m3)
+	{
+		this.m[0] += m3.m[0];
+		this.m[1] += m3.m[1];
+		this.m[2] += m3.m[2];
+		
+		this.m[3] += m3.m[3];
+		this.m[4] += m3.m[4];
+		this.m[5] += m3.m[5];
+
+		this.m[6] += m3.m[6];
+		this.m[7] += m3.m[7];
+		this.m[8] += m3.m[8];
+
+		return this;
+	}
+	
+	//行列同士の引き算
+	sub(m3)
+	{
+		this.m[0] -= m3.m[0];
+		this.m[1] -= m3.m[1];
+		this.m[2] -= m3.m[2];
+		
+		this.m[3] -= m3.m[3];
+		this.m[4] -= m3.m[4];
+		this.m[5] -= m3.m[5];
+
+		this.m[6] -= m3.m[6];
+		this.m[7] -= m3.m[7];
+		this.m[8] -= m3.m[8];
+
+		return this;
+	}
+	
+	//行列同士の掛け算
+	mul(m3)
+	{
+		const _00 = this.m[0] * m3.m[0] + this.m[1] * m3.m[3] + this.m[2] * m3.m[6];
+		const _01 = this.m[0] * m3.m[1] + this.m[1] * m3.m[4] + this.m[2] * m3.m[7];
+		const _02 = this.m[0] * m3.m[2] + this.m[1] * m3.m[5] + this.m[2] * m3.m[8];
+
+		const _10 = this.m[3] * m3.m[0] + this.m[4] * m3.m[3] + this.m[5] * m3.m[6];
+		const _11 = this.m[3] * m3.m[1] + this.m[4] * m3.m[4] + this.m[5] * m3.m[7];
+		const _12 = this.m[3] * m3.m[2] + this.m[4] * m3.m[5] + this.m[5] * m3.m[8];
+			
+		const _20 = this.m[6] * m3.m[0] + this.m[7] * m3.m[3] + this.m[8] * m3.m[6];
+		const _21 = this.m[6] * m3.m[1] + this.m[7] * m3.m[4] + this.m[8] * m3.m[7];
+		const _22 = this.m[6] * m3.m[2] + this.m[7] * m3.m[5] + this.m[8] * m3.m[8];
+			
+		this.m[0] = _00; this.m[1] = _01; this.m[2] = _02;
+		this.m[3] = _10; this.m[4] = _11; this.m[5] = _12;
+		this.m[6] = _20; this.m[7] = _21; this.m[8] = _22;
+		
+		return this;
+	}
+}
+
