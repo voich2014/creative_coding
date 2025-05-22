@@ -1,0 +1,698 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの半透明トーラストンネル2</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモでは、JavaScriptで半透明ラインアートでトーラストンネルを
+	描いてみました。
+	
+	トーラストンネルはJunKiyoshiさん(@junkiyoshi)の作品を元ネタに
+	しています。いつもありがとうございます(*´ω｀*)
+	https://twitter.com/junkiyoshi/status/1119566010216923136?s=20
+	
+	JunKiyoshiさんに圧倒的感謝を！
+	
+	2では、万華鏡キラキラでも使った、弱めの簡易Bloomを適用しています。
+	ただ、同じスクリーンに対してかけているので、2枚合成の割にはぼかし
+	が強く入って良い感じだと思います。軽いので速いし。
+	
+	Copyright (c) 2020 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.6.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>
+<style type="text/css">
+<!--
+-->
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+const TAU           = 2.0 * Math.PI;
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+let g_bloom_offscs  = [];		//ブルーム処理用オフスクリーンcanvas
+let g_scale         = 1.0;
+let g_rotate        = 0;
+
+const MORPH_TIME    = 5000;
+const MIN_s         = 0.5;
+const MAX_s         = 1.2;
+const MIN_la        = 48;
+const MAX_la        = 68;
+const MIN_lw        = 0.8;
+const MAX_lw        = 1.0;
+const MIN_add_c     = 0.01;
+const MAX_add_c     = 0.08;
+const MIN_td        = 800;
+const MAX_td        = 800;
+const MIN_min_r     = 10;
+const MAX_min_r     = 10;
+const MIN_max_r     = 60;
+const MAX_max_r     = 60;
+const MIN_step_r    = 10;
+const MAX_step_r    = 10;
+const MIN_step_ridx = 0.11;
+const MAX_step_ridx = 0.20;
+const MIN_or        = 100;
+const MAX_or        = 200;
+const MIN_step_za   = 10;
+const MAX_step_za   = 20;	//円の分割数が少ない程角ばってドラゴンっぽいｗ　あと計算量減って速くなる。
+const MIN_max_ya    = 60;
+const MAX_max_ya    = 60;
+const MIN_step_ya   = 20;
+const MAX_step_ya   = 20;
+const MIN_amp_r     = 1.0;
+const MAX_amp_r     = 2.5;
+const MIN_amp_z     = 70;
+const MAX_amp_z     = 90;
+const MIN_width_ny  = 0.8;
+const MAX_width_ny  = 1.0;
+const MIN_step_ny   = 0.08;
+const MAX_step_ny   = 0.1;
+const MIN_accel_nx  = 0.1;
+const MAX_accel_nx  = 3.0;
+const MIN_accel_ny  = 1.0;
+const MAX_accel_ny  = 1.0;
+
+let g_start_time      = 0;
+let g_next_time       = 0;
+let g_start_s         = 0;
+let g_next_s          = 0;
+let g_start_la        = 0;
+let g_next_la         = 0;
+let g_start_lw        = 0;
+let g_next_lw         = 0;
+let g_start_add_c     = 0;
+let g_next_add_c      = 0;
+let g_start_td        = 0;
+let g_next_td         = 0;
+let g_start_min_r     = 0;
+let g_next_min_r      = 0;
+let g_start_max_r     = 0;
+let g_next_max_r      = 0;
+let g_start_step_r    = 0;
+let g_next_step_r     = 0;
+let g_start_step_ridx = 0;
+let g_next_step_ridx  = 0;
+let g_start_or        = 0;
+let g_next_or         = 0;
+let g_start_step_za   = 0;
+let g_next_step_za    = 0;
+let g_start_max_ya    = 0;
+let g_next_max_ya     = 0;
+let g_start_step_ya   = 0;
+let g_next_step_ya    = 0;
+let g_start_amp_r     = 0;
+let g_next_amp_r      = 0;
+let g_start_amp_z     = 0;
+let g_next_amp_z      = 0;
+let g_start_width_ny  = 0;
+let g_next_width_ny   = 0;
+let g_start_step_ny   = 0;
+let g_next_step_ny    = 0;
+let g_start_accel_nx  = 0;
+let g_next_accel_nx   = 0;
+let g_start_accel_ny  = 0;
+let g_next_accel_ny   = 0;
+
+let g_ra_acc          = [];
+let g_xt              = 0;
+
+let g_def1_colors   = [];
+let g_def2_colors   = [];
+let g_start_colors  = [];
+let g_next1_colors  = [];
+let g_next2_colors  = [];
+
+let g_mtx_vp        = new MatrixMan4();
+
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		if(0)
+		{
+			//スマホに雰囲気合わせるバージョン	
+			const       h = 320;
+			g_game_width  = 500 / 320 * h;
+			g_game_height = h;
+			g_scale       = h / 320;
+			g_rotate      = -Math.PI / 2;
+		}
+		else
+		{
+			//PC側ならではの雰囲気にする
+			const       h = 720;
+			g_game_width  = 500 / 320 * h;
+			g_game_height = h;
+			g_scale       = 1.0;
+			g_rotate      = 0;
+		}
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//coolors.co URLからデフォルトパレットを生成
+	const url1    = "https://coolors.co/485696-e7e7e7-f9c784-fc7a1e-f24c00";
+	const url2    = "https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041";
+	g_def1_colors = createPaletteNHSL(url1);
+	g_def2_colors = createPaletteNHSL(url2);
+
+}
+
+function setup_matrix()
+{
+	
+	//射影・ビュー変換行列の準備
+	
+	//射影行列を生成
+	let mtx_projection = new MatrixMan4();
+	mtx_projection.projectionOpenGL(NEAR_Z_POS,FAR_Z_POS,rad(60),g_game_width/g_game_height);
+	
+	//ビュー行列を生成
+	let vFrom    = new VectorMan3(0.0,200.0,500.0);
+	let vTo      = new VectorMan3(0.0,0.0,0.0);
+	let vUp      = new VectorMan3(0.0,1.0,0.0);
+	let mtx_view = new MatrixMan4();
+	mtx_view.view(vFrom,vTo,vUp);
+	
+	//合成行列を作っておく
+	g_mtx_vp.initialize();
+	g_mtx_vp.mul(mtx_view);
+	g_mtx_vp.mul(mtx_projection);
+	
+}
+
+function setup_bloom()
+{
+	//ブルーム処理用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	let scale = 0.5;
+	for(let i = 0;i < 2;++i)
+	{
+		const cv   = document.createElement("canvas");
+		const ctx  = cv.getContext("2d");
+		const cv_w = sc_w * scale;
+		const cv_h = sc_h * scale;
+		
+		cv.width  = sc_w * scale;
+		cv.height = sc_h * scale;
+		cv.style.display = "none";
+		
+		let info =
+		{
+			cv: cv, cv_w: cv_w, cv_h: cv_h,
+			ctx: ctx
+		};
+		g_bloom_offscs.push(info);
+		
+		scale /= 2.0;
+	}
+}
+
+function do_bloom(ctx,draw_screen)
+{
+	//ブルーム処理を実施
+	
+	//レンダリング後画像にフィルタをかける
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//
+	// 簡易的なブルーム処理をやっています。
+	//
+	// 高輝度部分だけ抜き出しではなく、全体が光って見えちゃうので、
+	// 本来のブルーム処理とはちょっと違うと思いますが、とりあえず
+	// 手軽に光らせたい場合には楽かも(*´ω｀*)
+	//
+	
+	//複数段階の縦横2分の1ずつ解像度を下げたオフスクリーンキャンバスに
+	//CanvasのBlurフィルタをかけて、拡大して加算合成します
+	const offsc_num = g_bloom_offscs.length;
+	let blur_w = [ 6,10 ];
+	for(let idx = 0;idx < offsc_num;++idx)
+	{
+		//画面に表示されているキャンバスから現在の状態を取得
+		let offsc = g_bloom_offscs[idx];
+		offsc.ctx.clearRect(0,0,offsc.cv_w,offsc.cv_h);
+		offsc.ctx.drawImage(draw_screen,0,0,sc_w,sc_h,0,0,offsc.cv_w,offsc.cv_h);
+
+		//縮小された絵にフィルタをかけながら画面に反映(加算合成)
+		ctx.save();
+		ctx.globalAlpha = 1.0;
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter="blur("+blur_w[idx]+"px)";
+		ctx.drawImage(offsc.cv,0,0,offsc.cv_w,offsc.cv_h,0,0,sc_w,sc_h);
+		ctx.restore();
+		
+		//draw_screenが表示用のキャンバスと同じになっていると
+		//↑で合成したものをさらに取得して拡大するので、ぼかし
+		//がきつめにかけられてると思う。
+	}
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//変換行列の準備
+	setup_matrix();
+	
+	//ブルーム処理の準備
+	setup_bloom();
+
+	//最初の値を決める
+	//※1回だとstartの値が不定になるのでreset()を2回呼びます
+	g_next1_colors = g_def1_colors.slice();
+	g_next2_colors = g_def2_colors.slice();
+	reset();
+	reset();
+	
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_s         = g_next_s;
+	g_start_la        = g_next_la;
+	g_start_lw        = g_next_lw;
+	g_start_add_c     = g_next_add_c;
+	g_start_td        = g_next_td;
+	g_start_min_r     = g_next_min_r;
+	g_start_max_r     = g_next_max_r;
+	g_start_step_r    = g_next_step_r;
+	g_start_step_ridx = g_next_step_ridx;
+	g_start_or        = g_next_or;
+	g_start_step_za   = g_next_step_za;
+	g_start_max_ya    = g_next_max_ya;
+	g_start_step_ya   = g_next_step_ya;
+	g_start_amp_r     = g_next_amp_r;
+	g_start_amp_z     = g_next_amp_z;
+	g_start_width_ny  = g_next_width_ny;
+	g_start_step_ny   = g_next_step_ny;
+	g_start_accel_nx  = g_next_accel_nx;
+	g_start_accel_ny  = g_next_accel_ny;
+	
+	g_next_s         = Math.min(MIN_s         + rnd(MAX_s        *1000)/1000,MAX_s        );
+	g_next_la        = Math.min(MIN_la        + rnd(MAX_la            )     ,MAX_la       );
+	g_next_lw        = Math.min(MIN_lw        + rnd(MAX_lw       *1000)/1000,MAX_lw       );
+	g_next_add_c     = Math.min(MIN_add_c     + rnd(MAX_add_c    *1000)/1000,MAX_add_c    );
+	g_next_td        = Math.min(MIN_td        + rnd(MAX_td            )     ,MAX_td       );
+	g_next_min_r     = Math.min(MIN_min_r     + rnd(MAX_min_r         )     ,MAX_min_r    );
+	g_next_max_r     = Math.min(MIN_max_r     + rnd(MAX_max_r         )     ,MAX_max_r    );
+	g_next_step_r    = Math.min(MIN_step_r    + rnd(MAX_step_r        )     ,MAX_step_r   );
+	g_next_step_ridx = Math.min(MIN_step_ridx + rnd(MAX_step_ridx*1000)/1000,MAX_step_ridx);
+	g_next_or        = Math.min(MIN_or        + rnd(MAX_or            )     ,MAX_or       );
+	g_next_step_za   = Math.min(MIN_step_za   + rnd(MAX_step_za       )     ,MAX_step_za  );
+	g_next_max_ya    = Math.min(MIN_max_ya    + rnd(MAX_max_ya        )     ,MAX_max_ya   );
+	g_next_step_ya   = Math.min(MIN_step_ya   + rnd(MAX_step_ya       )     ,MAX_step_ya  );
+	g_next_amp_r     = Math.min(MIN_amp_r     + rnd(MAX_amp_r         )     ,MAX_amp_r    );
+	g_next_amp_z     = Math.min(MIN_amp_z     + rnd(MAX_amp_z         )     ,MAX_amp_z    );
+	g_next_width_ny  = Math.min(MIN_width_ny  + rnd(MAX_width_ny *1000)/1000,MAX_width_ny );
+	g_next_step_ny   = Math.min(MIN_step_ny   + rnd(MAX_step_ny  *1000)/1000,MAX_step_ny  );
+	g_next_accel_nx  = Math.min(MIN_accel_nx  + rnd(MAX_accel_nx *1000)/1000,MAX_accel_nx );
+	g_next_accel_ny  = Math.min(MIN_accel_ny  + rnd(MAX_accel_ny *1000)/1000,MAX_accel_ny );
+	
+	//パレットを決定
+	g_start_colors  = g_next1_colors.slice();	//配列の値渡しコピー
+	g_next1_colors  = g_next2_colors.slice();	//配列の値渡しコピー
+	g_next2_colors  = g_def1_colors.slice();	//次のパレットの初期値とする
+	getColormind(function(palette)
+	{
+		//Colormindから5色のパレットを取得
+		g_next2_colors = rgbAA2hslNA(palette);		
+	});
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//画面クリア
+	const sc_w  = g_game_width;
+	const sc_h  = g_game_height;
+	const ctx   = g_screen_ctx;
+	ctx.clearRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+
+	//シーンの準備
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e  = Ease.easeInSine(time);
+	const ce = Ease.easeInSine(time);
+	
+	let mtx_vp       = new MatrixMan4();
+	let mtx_scale    = new MatrixMan4();
+	let mtx_rotateY1 = new MatrixMan4();
+	let mtx_rotateY2 = new MatrixMan4();
+	let mtx_rotateX  = new MatrixMan4();
+	let mtx_rotateZ  = new MatrixMan4();
+	let mtx_rotateXZ = new MatrixMan4();
+	let mtx_model    = new MatrixMan4();
+	let vec_pos      = new VectorMan4();
+	
+	//半透明ラインの描画
+	ctx.globalCompositeOperation = 'lighter';
+	ctx.translate(sc_w / 2,sc_h / 2);
+	
+	const S           = (g_start_s        + e * (g_next_s         - g_start_s       )) * g_scale;
+	const la          = (g_start_la       + e * (g_next_la        - g_start_la      )) / 255;
+	const lw          = g_start_lw        + e * (g_next_lw        - g_start_lw       );
+	const add_c       = g_start_add_c     + e * (g_next_add_c     - g_start_add_c    );
+	const td          = g_start_td        + e * (g_next_td        - g_start_td       );
+	const t           = g_time / td;
+	const dt          = g_dtime / td;
+	const min_r       = g_start_min_r     + e * (g_next_min_r     - g_start_min_r    );
+	const max_r       = g_start_max_r     + e * (g_next_max_r     - g_start_max_r    );
+	const step_r      = g_start_step_r    + e * (g_next_step_r    - g_start_step_r   );
+	const step_ridx   = g_start_step_ridx + e * (g_next_step_ridx - g_start_step_ridx);
+	const or          = g_start_or        + e * (g_next_or        - g_start_or       );
+	const div_za      = g_start_step_za   + e * (g_next_step_za   - g_start_step_za  );
+	const step_za     = TAU / div_za;
+	const dig_max_ya  = g_start_max_ya    + e * (g_next_max_ya    - g_start_max_ya   );
+	const max_ya      = rad(dig_max_ya);
+	const dig_step_ya = g_start_step_ya   + e * (g_next_step_ya   - g_start_step_ya  );
+	const step_ya     = rad(dig_step_ya);
+	const amp_r       = g_start_amp_r     + e * (g_next_amp_r     - g_start_amp_r    );
+	const amp_z       = g_start_amp_z     + e * (g_next_amp_z     - g_start_amp_z    );
+	const width_ny    = g_start_width_ny  + e * (g_next_width_ny  - g_start_width_ny );
+	const start_ny    = t / 100;
+	const end_ny      = start_ny + width_ny;
+	const step_ny     = g_start_step_ny   + e * (g_next_step_ny   - g_start_step_ny  );
+	const accel_nx    = g_start_accel_nx  + e * (g_next_accel_nx  - g_start_accel_nx );
+	const accel_ny    = g_start_accel_ny  + e * (g_next_accel_ny  - g_start_accel_ny );
+	
+	mtx_vp.copy(g_mtx_vp);
+	mtx_scale.scale(S,S,S);
+	mtx_rotateX.rotateX(t/20);
+	mtx_rotateZ.rotateZ(t/50)
+	mtx_rotateXZ.copy(mtx_rotateX);
+	mtx_rotateXZ.mul(mtx_rotateZ);
+	
+	g_xt += dt * accel_nx;
+	const xt_nx = g_xt + accel_nx;
+			
+	const colors = [];
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		const col = 
+		{
+			h: SL.mix(g_start_colors[i].h,
+					  g_next1_colors[i].h,ce),
+			s: SL.mix(g_start_colors[i].s,
+					  g_next1_colors[i].s,ce),
+			l: SL.mix(g_start_colors[i].l,
+					  g_next1_colors[i].l,ce)
+		};
+		colors.push(col);
+	}
+	const hls_colors = [];
+	for(let i = 0;i < colors.length;++i)
+	{
+		const col = colors[i];
+		const h   = col.h * 360;
+		const s   = (col.s * 100)+"%";
+		const l   = (col.l < 0.90) ? "50%" : ((col.l * 100)+"%");
+		hls_colors.push(`hsl(${h},${s},${l})`);
+	}
+	
+	const cos_za  = [];
+	const sin_za  = [];
+	for(let za = 0,zaidx = 0;za < TAU;za += step_za,++zaidx)
+	{
+		cos_za.push(Math.cos(za));
+		sin_za.push(Math.sin(za));
+	}
+	const za_num = cos_za.length;
+
+	ctx.lineWidth   = 1.0;
+	ctx.globalAlpha = la * lw;
+	
+	const sc_w2  = sc_w / 2;
+	const sc_h2  = sc_h / 2;
+	let c = 0;
+	
+	for(let r = min_r,ridx = 1,aidx = 0;r < max_r;r += step_r,ridx += step_ridx,++aidx)
+	{
+		const rr = amp_r * r;
+		const ra = ((g_ra_acc[aidx]) ? g_ra_acc[aidx] : 0) + dt * ridx;
+		g_ra_acc[aidx] = ra;
+		mtx_rotateY1.rotateY(ra);
+		
+		for(let ya = 0;ya < max_ya;ya += step_ya)
+		{
+			mtx_rotateY2.rotateY(ya);
+			
+			//モデル行列変換はここで先に作っておく
+			//少しでも掛け算を減らして高速化するために
+			//平行移動行列の合成は手動でやります
+			mtx_model.copy(mtx_scale);
+			mtx_model.m[12] = or;			//平行移動合成
+			mtx_model.mul(mtx_rotateY2);
+			mtx_model.mul(mtx_rotateY1);
+			mtx_model.mul(mtx_rotateXZ);
+			mtx_model.mul(mtx_vp);
+			
+			const rya4    = (r + ya) * 4.0;
+			const ncos_za = [];
+			const x_za    = [];
+			const y_za    = [];
+			for(let za = 0,zaidx = 0;za < TAU;za += step_za,++zaidx)
+			{
+				ncos_za.push(xt_nx + Math.cos(rya4 + za));
+				x_za.push(rr * cos_za[zaidx]);
+				y_za.push(rr * sin_za[zaidx]);
+			}
+			
+			for(let ny = start_ny;ny < end_ny;ny += step_ny)
+			{
+				let pal = Math.floor(c) % colors.length;
+				c += add_c;
+			
+				ctx.beginPath();
+				ctx.strokeStyle = hls_colors[pal];
+				
+				const ny2 = ny * accel_ny;
+				for(let zaidx = 0;zaidx < za_num;++zaidx)
+				{
+					const n = g_pn.perlin(ncos_za[zaidx],ny2,t) - 0.5;
+					const x = x_za[zaidx];
+					const y = y_za[zaidx];
+					const z = amp_z * n;
+					vec_pos.setValue(x,y,z,1.0);
+			
+					//座標変換
+					vec_pos.mul_matrix(mtx_model);
+					vec_pos.x /= vec_pos.w;
+					vec_pos.y /= vec_pos.w;
+					vec_pos.x *= sc_w2;
+					vec_pos.y *= sc_h2;
+					
+					if(zaidx == 0)
+					{	ctx.moveTo(vec_pos.x,vec_pos.y);	}
+					else
+					{	ctx.lineTo(vec_pos.x,vec_pos.y);	}
+				}
+				ctx.closePath();
+				ctx.stroke();
+			}
+		}
+	}
+	
+	ctx.restore();
+	
+	//ブルーム処理
+	let screen = document.getElementById("game-screen");
+	do_bloom(ctx,screen);
+	
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>

@@ -1,0 +1,628 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの半透明トーラストンネル</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモでは、JavaScriptで半透明ラインアートでトーラストンネルを
+	描いてみました。
+	
+	トーラストンネルはJunKiyoshiさん(@junkiyoshi)の作品を元ネタに
+	しています。いつもありがとうございます(*´ω｀*)
+	https://junkiyoshi.com/openframeworks20190420/
+	
+	JunKiyoshiさんに圧倒的感謝を！
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.6.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.2.0.js"></script>
+<style type="text/css">
+<!--
+-->
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_time          = 0;		//現在時刻[ms]
+let g_dtime         = 0;		//前回の描画からの経過時間[ms]
+
+const TAU           = 2.0 * Math.PI;
+let g_pn            = new Perlin();
+let g_screen_ctx    = null;
+let g_scale         = 1.0;
+let g_rotate        = 0;
+
+const MORPH_TIME    =  5000;
+const X_DIST        =  320 / 2;
+const MIN_s         =  0.8;
+const MAX_s         =  1.9;
+const MIN_la        =  48;
+const MAX_la        =  64;
+const MIN_lw        =  0.5;
+const MAX_lw        =  1.0;
+const MIN_a         =  2;
+const MAX_a         =  5;
+const MIN_oa        = -Math.PI/1;
+const MAX_oa        =  Math.PI/1;
+const MIN_ox        = -180;
+const MAX_ox        =  180;
+const MIN_oy        = -180;
+const MAX_oy        =  180;
+const MIN_x_step1   =  6;
+const MAX_x_step1   =  14;
+const MIN_x_step2   =  0.005;
+const MAX_x_step2   =  0.02;
+const MIN_y_step    =  0.03;
+const MAX_y_step    =  0.08;
+const MIN_y_width   =  1;
+const MAX_y_width   =  1;
+const MIN_y_amp     =  50;
+const MAX_y_amp     =  180;
+const MIN_rd        =  0;
+const MAX_rd        =  300;
+const MIN_xd        =  1;
+const MAX_xd        =  8;
+const MIN_c         =  0.01;
+const MAX_c         =  0.04;
+
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_start_s       = 0;
+let g_next_s        = 0;
+let g_start_la      = 0;
+let g_next_la       = 0;
+let g_start_lw      = 0;
+let g_next_lw       = 0;
+let g_start_a       = 0;
+let g_next_a        = 0;
+let g_start_oa      = 0;
+let g_next_oa       = 0;
+let g_start_ox      = 0;
+let g_next_ox       = 0;
+let g_start_oy      = 0;
+let g_next_oy       = 0;
+let g_start_x_step1 = 0;
+let g_next_x_step1  = 0;
+let g_start_x_step2 = 0;
+let g_next_x_step2  = 0;
+let g_start_y_step  = 0;
+let g_next_y_step   = 0;
+let g_start_y_width = 0;
+let g_next_y_width  = 0;
+let g_start_y_amp   = 0;
+let g_next_y_amp    = 0;
+let g_start_rd      = 0;
+let g_next_rd       = 0;
+let g_start_xd      = 0;
+let g_next_xd       = 0;
+let g_start_c       = 0;
+let g_next_c        = 0;
+
+let g_def1_colors   = [];
+let g_def2_colors   = [];
+let g_start_colors  = [];
+let g_next1_colors  = [];
+let g_next2_colors  = [];
+
+let g_mtx_vp        = new MatrixMan4();
+
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+let g_fps_visible   = true;
+
+let g_cnt           = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		if(0)
+		{
+			//スマホに雰囲気合わせるバージョン	
+			const       h = 320;
+			g_game_width  = 500 / 320 * h;
+			g_game_height = h;
+			g_scale       = h / 320;
+			g_rotate      = -Math.PI / 2;
+		}
+		else
+		{
+			//PC側ならではの雰囲気にする
+			const       h = 720;
+			g_game_width  = 500 / 320 * h;
+			g_game_height = h;
+			g_scale       = 1.0;
+			g_rotate      = 0;
+		}
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const sc_w   = g_game_width;
+	const sc_h   = g_game_height;
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//coolors.co URLからデフォルトパレットを生成
+	const url1    = "https://coolors.co/485696-e7e7e7-f9c784-fc7a1e-f24c00";
+	const url2    = "https://coolors.co/e4572e-17bebb-ffc914-2e282a-76b041";
+	g_def1_colors = createPaletteNHSL(url1);
+	g_def2_colors = createPaletteNHSL(url2);
+
+}
+
+function setup_matrix()
+{
+	
+	//射影・ビュー変換行列の準備
+	
+	//射影行列を生成
+	let mtx_projection = new MatrixMan4();
+	mtx_projection.projectionOpenGL(NEAR_Z_POS,FAR_Z_POS,rad(60),g_game_width/g_game_height);
+	
+	//ビュー行列を生成
+	let vFrom    = new VectorMan3(0.0,200.0,500.0);
+	let vTo      = new VectorMan3(0.0,0.0,0.0);
+	let vUp      = new VectorMan3(0.0,1.0,0.0);
+	let mtx_view = new MatrixMan4();
+	mtx_view.view(vFrom,vTo,vUp);
+	
+	//合成行列を作っておく
+	g_mtx_vp.initialize();
+	g_mtx_vp.mul(mtx_view);
+	g_mtx_vp.mul(mtx_projection);
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//変換行列の準備
+	setup_matrix();
+	
+	//最初の値を決める
+	//※1回だとstartの値が不定になるのでreset()を2回呼びます
+	g_next1_colors = g_def1_colors.slice();
+	g_next2_colors = g_def2_colors.slice();
+	reset();
+	reset();
+	
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_s       = g_next_s;
+	g_start_la      = g_next_la;
+	g_start_lw      = g_next_lw;
+	g_start_a       = g_next_a;
+	g_start_c       = g_next_c;
+	g_start_oa      = g_next_oa;
+	g_start_ox      = g_next_ox;
+	g_start_oy      = g_next_oy;
+	g_start_x_step1 = g_next_x_step1;
+	g_start_x_step2 = g_next_x_step2;
+	g_start_y_step  = g_next_y_step;
+	g_start_y_width = g_next_y_width;
+	g_start_y_amp   = g_next_y_amp;
+	g_start_rd      = g_next_rd;
+	g_start_xd      = g_next_xd;
+	
+	g_next_s        = Math.min(MIN_s  + rnd(MAX_s *1000)/1000,MAX_s );
+	g_next_la       = Math.min(MIN_la + rnd(MAX_la     )     ,MAX_la);
+	g_next_lw       = Math.min(MIN_lw + rnd(MAX_lw*1000)/1000,MAX_lw);
+	g_next_a        = Math.min(MIN_a  + rnd(MAX_a      )     ,MAX_a );
+	g_next_c        = Math.min(MIN_c  + rnd(MAX_c *1000)/1000,MAX_c );
+	g_next_oa       = rnd((MAX_oa-MIN_oa)*1000)/1000 + MIN_oa;
+	g_next_ox       = rnd(MAX_ox-MIN_ox) + MIN_ox;
+	g_next_oy       = rnd(MAX_oy-MIN_oy) + MIN_oy;
+	g_next_x_step1  = Math.min(MIN_x_step1 + rnd(MAX_x_step1),MAX_x_step1);
+	g_next_x_step2  = Math.min(MIN_x_step2 + rnd(MAX_x_step2*1000)/1000,MAX_x_step2);
+	g_next_y_step   = Math.min(MIN_y_step  + rnd(MAX_y_step *1000)/1000,MAX_y_step );
+	g_next_y_width  = Math.min(MIN_y_width + rnd(MAX_y_width),MAX_y_width);
+	g_next_y_amp    = Math.min(MIN_y_amp   + rnd(MAX_y_amp  ),MAX_y_amp  );
+	g_next_rd       = Math.min(MIN_rd      + rnd(MAX_rd     ),MAX_rd     );
+	g_next_xd       = Math.min(MIN_xd      + rnd(MAX_xd     ),MAX_xd     );
+	
+	//パレットを決定
+	g_start_colors  = g_next1_colors.slice();	//配列の値渡しコピー
+	g_next1_colors  = g_next2_colors.slice();	//配列の値渡しコピー
+	g_next2_colors  = g_def1_colors.slice();	//次のパレットの初期値とする
+	getColormind(function(palette)
+	{
+		//Colormindから5色のパレットを取得
+		g_next2_colors = rgbAA2hslNA(palette);		
+	});
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div = document.getElementById("fps");
+	fps_div.style.display = g_fps_visible ? "block" : "none";
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//画面クリア
+	const sc_w  = g_game_width;
+	const sc_h  = g_game_height;
+	const ctx   = g_screen_ctx;
+	ctx.clearRect(0,0,sc_w,sc_h);
+	
+	ctx.save();
+
+	//シーンの準備
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e  = Ease.easeInSine(time);
+	const ce = Ease.easeInSine(time);
+	
+	let mtx_vp       = new MatrixMan4();
+	let mtx_scale    = new MatrixMan4();
+	let mtx_rotateY1 = new MatrixMan4();
+	let mtx_rotateY2 = new MatrixMan4();
+	let mtx_rotateX  = new MatrixMan4();
+	let mtx_rotateZ  = new MatrixMan4();
+	let mtx_work     = new MatrixMan4();
+	let mtx_move     = new MatrixMan4();
+	let mtx_model    = new MatrixMan4();
+	let vec_pos      = new VectorMan4();
+	
+	//半透明ラインの描画
+	ctx.globalCompositeOperation = 'lighter';
+	ctx.translate(sc_w / 2,sc_h / 2);
+	
+	const S         = (g_start_s + e * (g_next_s - g_start_s)) * g_scale;
+	const la        = (g_start_la + e * (g_next_la - g_start_la)) / 255;
+	const lw        = g_start_lw + e * (g_next_lw - g_start_lw);
+	const add_a     = Math.PI / (g_start_a + e * (g_next_a - g_start_a));
+	const oa        = g_start_oa + e * (g_next_oa - g_start_oa);
+	const ox        = g_start_ox + e * (g_next_ox - g_start_ox);
+	const oy        = g_start_oy + e * (g_next_oy - g_start_oy);
+	const add_c     = g_start_c + e * (g_next_c - g_start_c);
+	const start_pos = -X_DIST - 1;
+	const end_pos   =  X_DIST + 1;
+	const x_step1   = g_start_x_step1 + e * (g_next_x_step1 - g_start_x_step1);
+	const x_step2   = g_start_x_step2 + e * (g_next_x_step2 - g_start_x_step2);
+	const y_step    = g_start_y_step  + e * (g_next_y_step  - g_start_y_step );
+	const y_width   = g_start_y_width + e * (g_next_y_width - g_start_y_width);
+	const y_amp     = (g_start_y_amp + e * (g_next_y_amp   - g_start_y_amp)) * S;
+	const rd        = g_start_rd      + e * (g_next_rd      - g_start_rd     );
+	const xd        = g_start_xd      + e * (g_next_xd      - g_start_xd     );
+	const td        = 800;
+	const t         = g_time / td;
+	const tt        = t / 4;
+	const start_y   = t / 100;
+	const end_y     = start_y + y_width;
+	
+	mtx_vp.copy(g_mtx_vp);
+	mtx_scale.scale(S,S,S);
+	mtx_rotateX.rotateX(t/20);
+	mtx_rotateZ.rotateZ(t/50)
+	mtx_work.copy(mtx_rotateX);
+	mtx_work.mul(mtx_rotateZ);
+	
+	const colors = [];
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		const col = 
+		{
+			h: SL.mix(g_start_colors[i].h,
+					  g_next1_colors[i].h,ce),
+			s: SL.mix(g_start_colors[i].s,
+					  g_next1_colors[i].s,ce),
+			l: SL.mix(g_start_colors[i].l,
+					  g_next1_colors[i].l,ce)
+		};
+		colors.push(col);
+	}
+	const hls_colors = [];
+	for(let i = 0;i < colors.length;++i)
+	{
+		const col = colors[i];
+		const h   = col.h * 360;
+		const s   = (col.s * 100)+"%";
+		const l   = (col.l < 0.90) ? "50%" : ((col.l * 100)+"%");
+		hls_colors.push(`hsl(${h},${s},${l})`);
+	}
+	
+	const x_table = [];
+	for(let x = start_pos,xidx = 0;x < end_pos;x += x_step1,++xidx)
+	{
+		x_table.push([ x * x_step2,rd * Math.sin(rad(x/xd)) ]);
+	}
+		
+	ctx.lineWidth   = 1.0;
+	ctx.globalAlpha = la * lw;
+	
+	const min_r     = 5;
+	const max_r     = 40;
+	const step_r    = 5;
+	const or        = 100;
+	const step_za   = TAU / 20;
+	const max_ya    = rad(60);
+	const step_ya   = rad(20);
+	const amp_z     = 40;
+	const width_ny  = 0.4;
+	const start_ny  = t / 100;
+	const end_ny    = start_ny + width_ny;
+	const step_ny   = 0.08;
+	
+	const sc_w2  = sc_w / 2;
+	const sc_h2  = sc_h / 2;
+	
+	mtx_move.translate(or,0,0);
+	
+	let c = 0;
+	
+	for(let r = min_r,ridx = 1;r < max_r;r += step_r,ridx += 0.11)
+	{
+		mtx_rotateY1.rotateY(t*(ridx)*1.0);
+	
+		for(let ya = 0;ya < max_ya;ya += step_ya)
+		{
+			mtx_rotateY2.rotateY(ya);
+	
+			for(let ny = start_ny;ny < end_ny;ny += step_ny)
+			{
+				let pal = Math.floor(c) % colors.length;
+				c += add_c;
+			
+				ctx.beginPath();
+				ctx.strokeStyle = hls_colors[pal];
+			
+				for(let za = 0;za < TAU;za += step_za)
+				{
+					const n = g_pn.perlin(t + r + ya + za,ny,tt) - 0.5;
+					const x = r * Math.cos(za);
+					const y = r * Math.sin(za);
+					const z = amp_z * n;
+					vec_pos.setValue(x,y,z,1.0);
+			
+					//高速化のため拡大と並行移動行列は手動で作り、
+					//そこに回転行列を合成します
+					mtx_model.copy(mtx_move);
+					
+					mtx_model.mul(mtx_scale);
+					mtx_model.mul(mtx_rotateY2);
+					mtx_model.mul(mtx_rotateY1);
+					//mtx_model.m[6] = ox;
+					//mtx_model.m[7] = oy + x_table[xidx][1];
+					mtx_model.mul(mtx_work);
+					
+
+					//座標変換
+					vec_pos.mul_matrix(mtx_model);
+					vec_pos.mul_matrix(mtx_vp);
+					vec_pos.x /= vec_pos.w;
+					vec_pos.y /= vec_pos.w;
+					vec_pos.z /= vec_pos.w;
+					vec_pos.x *= sc_w2;
+					vec_pos.y *= sc_h2;
+					
+					if(za == 0)
+					{	ctx.moveTo(vec_pos.x,vec_pos.y);	}
+					else
+					{	ctx.lineTo(vec_pos.x,vec_pos.y);	}
+				}
+				ctx.closePath();
+				ctx.stroke();
+			}
+		}
+		//break;
+	}
+	
+/*	
+	for(let a = 0;a < TAU;a += add_a)
+	{
+		//補間で回転数が増えていく際に位置が近すぎると
+		//加算合成で急に明るく見えるので透明度を調整
+		const near = 0.018;
+		if((add_a < near) && (a + add_a) > TAU)
+		{	ctx.globalAlpha = la * lw * (add_a / near);	};
+	
+		mtx_work.rotateZ(a + g_rotate);
+		mtx_work.mul(mtx_rotateZ);
+		
+		for(let y = start_y;y < end_y;y += y_step)
+		{
+			let pal = Math.floor(c) % colors.length;
+			c += add_c;
+			
+			ctx.beginPath();
+			ctx.strokeStyle = hls_colors[pal];
+			
+			for(let x = start_pos,xidx = 0;x < end_pos;x += x_step1,++xidx)
+			{
+				const n = g_pn.perlin(t + x_table[xidx][0],y,tt) - 0.5;
+				vec_pos.setValue(x,y_amp * n);
+		
+				//高速化のため拡大と並行移動行列は手動で作り、
+				//そこに回転行列を合成します
+				mtx_model.copy(mtx_scale);
+				mtx_model.m[6] = ox;
+				mtx_model.m[7] = oy + x_table[xidx][1];
+				mtx_model.mul(mtx_work);
+
+				//座標変換
+				vec_pos.mul_matrix(mtx_model);
+				
+				if(x == start_pos)
+				{	ctx.moveTo(vec_pos.x,vec_pos.y);	}
+				else
+				{	ctx.lineTo(vec_pos.x,vec_pos.y);	}
+			}
+			ctx.stroke();
+		}
+	}
+*/
+	
+	ctx.restore();
+	
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
