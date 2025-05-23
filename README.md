@@ -72,6 +72,7 @@ creative_coding/
 - `gmo2`：[パパのポイントキラキラ](https://voich2014.github.io/creative_coding/src/gmo2/index1.html)
 - `awave2`：[パパのAlphaWave2](https://voich2014.github.io/creative_coding/src/awave2/index6.html)
 - `att`：[パパのウロボロスドラゴンテイル](https://voich2014.github.io/creative_coding/src/att/index2.html)
+- `mand`：[パパのマンデルブロ集合](https://voich2014.github.io/creative_coding/src/mand/index4.html)
 
 
 ---

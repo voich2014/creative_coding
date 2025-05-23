@@ -1,0 +1,462 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのマンデルブロ集合(実験)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、マンデルブロ集合をJavaScriptのCanvasで描画します。
+	
+	マンデルブロ集合(Wikipedia)
+	https://ja.wikipedia.org/wiki/%E3%83%9E%E3%83%B3%E3%83%87%E3%83%AB%E3%83%96%E3%83%AD%E9%9B%86%E5%90%88
+	
+	マンデルブロ集合は、Wikipediaによると、以下の漸化式(ぜんかしき)によって
+	定義されるとありますが…
+	
+	Zn+1 = Zn^2 + C
+	Z0   = 0
+	
+	よくわからないので、下記のサイトの説明を参考に実装しました。
+	ありがとうございます！
+	https://wgld.org/d/glsl/g005.html
+	http://turanegaku.hateblo.jp/entry/2016/02/06/020958
+	https://azisava.sakura.ne.jp/mandelbrot/algorithm.html
+	https://www.programmingmat.jp/soft_dev/mandjs.html
+	https://woodhero2357.hatenablog.com/entry/2018/06/06/235830
+	
+	マンデルブロ集合とは、ある計算を繰り返した時に、発散しない
+	点の集合ということみたいです。
+	
+	ここで言う発散とは無限に値が大きくなる状態のことを言うそうです。
+	逆に発散しない値は、値が動かなかったり、+側と-側で行ったり来たり
+	するような値で、これを振動すると言うようです。
+	
+	つまり、マンデルブロ集合はある回数計算を繰り返しても発散しなかった
+	部分を表したものということです。
+	
+	マンデルブロ集合の色は、ある回数内の計算内で発散してしまうと判断
+	されるまでの回数などで決めるようです。
+	発散しない場合、計算回数はMax値になります。
+	
+	発散してるかどうかは、↑の解説サイトを参考にすると、
+	複素数z = a+bi として、√(a*a+b*b) > 2 という条件のようですが、
+	平方根の計算を省いて、(a*a+b*b) > 4 で判定します。
+	(4より大きいと発散する値だと判断する)
+	
+	マンデルブロ集合、難しいですね(*´ω｀*)
+	
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: black;
+		color: #fff;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:0px;
+		z-index: 100;
+	}
+	
+	#algo
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:16px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+	
+	.texture
+	{
+		display: none;
+	}
+-->
+</style>
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.2.0.js"></script>
+
+<!-- 自前ライブラリ群 -->
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 320;
+
+let g_pn     = new Perlin();			//パーリンノイズ生成用
+let g_time   = 0;						//現在時刻[ms]
+let g_dtime  = 0;						//前回の描画からの経過時間[ms]
+
+const MANDEL_WIDTH  = 400;				//マンデルブロ集合平面の最初の幅
+const MANDEL_HEIGHT = 400;				//マンデルブロ集合平面の最初の高さ
+
+const MANDEL_R_MIN       = -2.0;
+const MANDEL_R_MAX       =  0.5;
+const MANDEL_I_MIN       = -1.25;
+const MANDEL_I_MAX       =  1.25;
+const MANDEL_R_DISTANCE  = MANDEL_R_MAX - MANDEL_R_MIN;
+const MANDEL_I_DISTANCE  = MANDEL_I_MAX - MANDEL_I_MIN;
+
+//マンデルブロ集合のr(実軸)の範囲は、-2.00 ～ 0.50
+//                  i(虚軸)の範囲は、-1.25 ～ 1.25
+//
+
+const MORPH_TIME    = 3000;
+let g_screen_ctx    = null;
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_ease          = null;
+let g_pos_r         = 0;
+let g_pos_i         = 0;
+let g_pos_dr        = 0;
+let g_pos_di        = 0;
+let g_target_r      = 0;
+let g_target_i      = 0;
+let g_target_end    = 0;
+let g_base_hue      = 0;
+let g_last_draw     = 0;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+let g_cnt = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 480;
+		g_game_height = 480;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+	//最初にアルファ値が255になるように埋める
+	g_offsc.data.fill(255);
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メイン画面のContextを取得しておく
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+		g_base_hue   = rnd(360);
+	}
+	
+	if((g_time - g_last_draw) >= 100)
+	{
+		//経過時間計算
+		const t  = (g_time - g_start_time);
+		const tz = g_cnt / 100;
+		const tp = 2 + g_cnt / 10;
+		
+		//画面キャンバスの全ピクセルについて判定して色付け
+		const sc_w     = g_game_width;
+		const sc_h     = g_game_height;
+		let   zoom     = 1.0/*0.25*/ + Math.pow(tz,tp);	//拡大率
+		let   data     = g_offsc.data;
+		let   pos_list = [];
+		
+		//現在の拡大率から画面左上の座標と
+		//1ピクセル辺りの移動量を計算
+		const zr       = 1.0 / zoom;
+		const md_w     = MANDEL_R_DISTANCE;
+		const md_h     = MANDEL_I_DISTANCE;
+		const md_w2    = md_w / 2;
+		const md_h2    = md_h / 2;
+		const md_left  = (MANDEL_R_MIN + md_w2) - md_w2 * zr;
+		const md_top   = (MANDEL_I_MIN + md_h2) - md_h2 * zr;
+		const md_wzr   = md_w * zr;
+		const md_hzr   = md_h * zr
+		const step_w   = md_wzr / sc_w;
+		const step_h   = md_hzr / sc_h;
+		const offset_r = g_pos_r;
+		const offset_i = g_pos_i;
+		
+		for(let i = 0;i < sc_h;++i)		//複素平面の虚軸
+		{
+			let i_pos = sc_w * i;
+			for(let r = 0;r < sc_w;++r)	//複素平面の実軸
+			{
+				//画面の解像度で正規化して利用
+				const tr = md_left + (r * step_w);
+				const ti = md_top  + (i * step_h);
+				cr = offset_r + tr;
+				ci = offset_i + ti;
+				
+				//発散するまでの回数を調べる
+				const CALC_MAX = 300;
+				let x = 0;
+				let y = 0;
+				let n = 0;
+				for(;n < CALC_MAX;++n)
+				{
+					const xx = (x * x) - (y * y) + cr;
+					const yy = 2.0 * x * y + ci;
+					x = xx;
+					y = yy;
+					
+					//発散すると判断できるか？
+					if(((x * x) + (y * y)) > 4)
+					{	break;	}
+				}
+			
+				//発散しなかったら黒
+				let col = { r:0.0,g:0.0,b:0.0 };
+				if(n < CALC_MAX)
+				{
+					//発散がMAX回数に近いほど暗くする
+					//g_cntの大きさに合わせてちょっとずつ明るくもしておく
+					const MAX_L = 1.0;
+					const nr    = n / CALC_MAX;
+					col = hsl2rgb(g_base_hue + nr * 360 + tr * 120 + ti * 180,1.0,
+								  (nr > 0.8) ? (nr * 0.25) : (MAX_L - nr * MAX_L + (g_cnt / 4000)));
+					
+					if(0.5 < nr)
+					{
+						let a;
+						a = 0;
+					}
+					
+					//かろうじて発散するところを覚えておく
+					//if((0.75 < nr) && (nr < 0.90))
+					if((0.80 < nr) && (nr < 0.99))
+					{
+						pos_list.push({ r:r,i:i });
+					}
+				}
+				
+				const pos = (i_pos + r) << 2;
+				data[pos + 0] = col.r * 255;
+				data[pos + 1] = col.g * 255;
+				data[pos + 2] = col.b * 255;
+			}
+		}
+		
+		//ターゲット位置を決定する
+		const MOVE_TIMES = 100;
+		if((g_pos_r == 0) && (g_pos_i == 0))
+		{
+			const pos  = rnd(pos_list.length);
+			g_target_r = (pos_list[pos].r * step_w) - md_w2 * zr;
+			g_target_i = (pos_list[pos].i * step_h) - md_h2 * zr;
+			g_pos_dr   = g_target_r / MOVE_TIMES;
+			g_pos_di   = g_target_i / MOVE_TIMES;
+		}
+		
+		//ターゲットの更新
+		if(g_cnt < MOVE_TIMES)
+		{
+			g_pos_r+= g_pos_dr;
+			g_pos_i+= g_pos_di;
+		}
+		
+		//ターゲット終了チェック
+		if((g_cnt > 200) && (g_target_end == 0))
+		{
+			g_target_end = g_time;
+		}
+		
+		//メイン画面用キャンバスを更新
+		g_screen_ctx.putImageData(g_offsc,0,0);
+		g_last_draw = g_time;
+		g_cnt++;
+		
+		//フェードイン
+		if(t < 500)
+		{
+			g_screen_ctx.save();
+			g_screen_ctx.fillStyle = "rgba(0,0,0,"+(1.0 - t / 500)+")";
+			g_screen_ctx.fillRect(0,0,sc_w,sc_h);
+			g_screen_ctx.restore();
+		}
+		//フェードアウト
+		if(g_target_end != 0)
+		{
+			let fo = (g_time - g_target_end) / 1000;
+			if(fo >= 1.0)
+			{
+				//リセットを掛けておく
+				g_start_time = 0;
+				g_pos_r      = 0;
+				g_pos_i      = 0;
+				g_target_end = 0;
+				g_last_draw  = 0;
+				g_cnt        = 0;
+				fo           = 1.0;
+			}
+			
+			g_screen_ctx.save();
+			g_screen_ctx.fillStyle = "rgba(0,0,0,"+fo+")";
+			g_screen_ctx.fillRect(0,0,sc_w,sc_h);
+			g_screen_ctx.restore();
+		}
+	}
+
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>

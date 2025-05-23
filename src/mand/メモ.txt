@@ -1,0 +1,25 @@
+マンデルブロ集合
+https://ja.wikipedia.org/wiki/%E3%83%9E%E3%83%B3%E3%83%87%E3%83%AB%E3%83%96%E3%83%AD%E9%9B%86%E5%90%88
+
+わかりやすい
+https://wgld.org/d/glsl/g005.html
+
+発散するかどうかの判定は a*a+b*b > 4にする
+http://turanegaku.hateblo.jp/entry/2016/02/06/020958
+https://azisava.sakura.ne.jp/mandelbrot/algorithm.html
+
+
+色の決め方（参考）
+https://www.programmingmat.jp/soft_dev/mandjs.html
+https://woodhero2357.hatenablog.com/entry/2018/06/06/235830
+
+
+マンデルブロコードいろいろ
+http://turanegaku.hateblo.jp/entry/2016/02/06/020958
+https://saeki-ce.xsrv.jp/C_src/mandelbrot01.html
+https://qiita.com/fujim2/items/b2a0e00d5ecaeb3d4fde
+
+JavaScript
+https://azisava.sakura.ne.jp/mandelbrot/mandelbrot.html#/4/0/0/0/500/0/2/0/0/2/5/1000
+
+

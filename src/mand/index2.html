@@ -1,0 +1,587 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのマンデルブロ集合R(WebGL)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、マンデルブロ集合をJavaScriptのCanvasで描画します。
+	
+	このWebGL版では、GPUでマンデルブロ集合の計算をしています。
+	ただ、GPUのfloatの精度の問題なのか、JavaScriptだけで計算した時
+	よりも、拡大の限界が早めに訪れてしまいました…
+	
+	
+	マンデルブロ集合(Wikipedia)
+	https://ja.wikipedia.org/wiki/%E3%83%9E%E3%83%B3%E3%83%87%E3%83%AB%E3%83%96%E3%83%AD%E9%9B%86%E5%90%88
+	
+	マンデルブロ集合は、Wikipediaによると、以下の漸化式(ぜんかしき)によって
+	定義されるとありますが…
+	
+	Zn+1 = Zn^2 + C
+	Z0   = 0
+	
+	よくわからないので、下記のサイトの説明を参考に実装しました。
+	ありがとうございます！
+	https://wgld.org/d/glsl/g005.html
+	http://turanegaku.hateblo.jp/entry/2016/02/06/020958
+	https://azisava.sakura.ne.jp/mandelbrot/algorithm.html
+	https://www.programmingmat.jp/soft_dev/mandjs.html
+	https://woodhero2357.hatenablog.com/entry/2018/06/06/235830
+	
+	マンデルブロ集合とは、ある計算を繰り返した時に、発散しない
+	点の集合ということみたいです。
+	
+	ここで言う発散とは無限に値が大きくなる状態のことを言うそうです。
+	逆に発散しない値は、値が動かなかったり、+側と-側で行ったり来たり
+	するような値で、これを振動すると言うようです。
+	
+	つまり、マンデルブロ集合はある回数計算を繰り返しても発散しなかった
+	部分を表したものということです。
+	
+	マンデルブロ集合の色は、ある回数内の計算内で発散してしまうと判断
+	されるまでの回数などで決めるようです。
+	発散しない場合、計算回数はMax値になります。
+	
+	発散してるかどうかは、↑の解説サイトを参考にすると、
+	複素数z = a+bi として、√(a*a+b*b) > 2 という条件のようですが、
+	平方根の計算を省いて、(a*a+b*b) > 4 で判定します。
+	(4より大きいと発散する値だと判断する)
+	
+	マンデルブロ集合、難しいですね(*´ω｀*)
+	
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.2.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.0.0.js"></script>
+
+<!-- WebGLのシェーダ定義 -->
+<script id="vshader-main" type="x-shader/x-vertex">#version 300 es
+	//頂点シェーダ
+	in vec3 vtx_pos;			//頂点の座標
+	
+	void main(void)
+	{
+		//座標はそのまま伝える
+		gl_Position = vec4(vtx_pos,1.0);
+	}
+</script>
+
+<script id="fshader-main" type="x-shader/x-fragment">#version 300 es
+    //フラグメントシェーダ
+    precision highp float;
+    
+    uniform float calc_max;
+    uniform float base_hue;
+    uniform float cnt;
+    uniform float zoom_ratio;	//1.0 / zoom が入ってる
+    uniform float pos_r;
+    uniform float pos_i;
+    
+	uniform float sc_w_ratio;	//1.0 / sc_w が入ってる	
+	uniform float sc_h_ratio;	//1.0 / sc_h が入ってる
+
+    out vec4 f_color;			//フラグメントシェーダとしての出力色
+    
+    //  Function from Iñigo Quiles
+	//  https://www.shadertoy.com/view/MsS3Wc
+	vec3 hsb2rgb( in vec3 c )
+	{
+	    vec3 rgb = clamp(abs(mod(c.x*6.0+vec3(0.0,4.0,2.0),
+	                             6.0)-3.0)-1.0,
+	                     0.0,
+	                     1.0 );
+	    rgb = rgb*rgb*(3.0-2.0*rgb);
+	    return c.z * mix(vec3(1.0), rgb, c.y);
+	}
+	
+    void main(void)
+    {
+    	float r  = gl_FragCoord.x * sc_w_ratio;	//複素平面の虚軸
+    	float i  = gl_FragCoord.y * sc_h_ratio;	//複素平面の虚軸
+		float tr = (r - 0.6 ) * zoom_ratio;
+		float ti = (i - 0.25) * zoom_ratio;
+		float cr = pos_r + tr;
+		float ci = pos_i + ti;
+		
+		//発散するまでの回数を調べる
+		float x = 0.0;
+		float y = 0.0;
+		float n = 0.0;
+		for(;n < calc_max;++n)
+		{
+			float xx = (x * x) - (y * y) + cr;
+			float yy = 2.0 * x * y + ci;
+			x = xx;
+			y = yy;
+			
+			//発散すると判断できるか？
+			if(((x * x) + (y * y)) > 4.0)
+			{	break;	}
+		}
+	
+		//発散しなかったら黒
+		vec3 col = vec3(0.0);
+		if(n < calc_max)
+		{
+			float nr = n * 2.0 / calc_max;
+			float h  = mod(base_hue + cnt * 0.5 + nr * 360.0,360.0) / 360.0;
+			col = hsb2rgb(vec3(h,0.95,0.8));
+		}
+ 
+		f_color = vec4(clamp(col,0.0,1.0),1.0);
+	}
+</script>
+
+<script type="text/javascript">
+
+
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 320;
+
+let g_webgl_screen  = null;
+let g_gl            = null;
+let g_prog_main     = null;
+let g_vbo_main      = {};
+
+let g_time   = 0;						//現在時刻[ms]
+let g_dtime  = 0;						//前回の描画からの経過時間[ms]
+
+const CALC_MAX      = 300;
+const MOVE_TIMES    = 100;
+let g_screen_ctx    = null;
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_ease          = null;
+let g_pos_r         = 0;
+let g_pos_i         = 0;
+let g_pos_dr        = 0;
+let g_pos_di        = 0;
+let g_target_r      = 0;
+let g_target_i      = 0;
+let g_target_end    = 0;
+let g_base_hue      = 0;
+let g_last_draw     = 0;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+let g_cnt = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 480;
+		g_game_height = 480;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//WebGL用のCanvasもスクリーンと同じサイズで用意
+	g_webgl_screen        = document.createElement("canvas");
+	g_webgl_screen.width  = g_game_width;
+	g_webgl_screen.height = g_game_height;
+	
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+	//最初にアルファ値が255になるように埋める
+	g_offsc.data.fill(255);
+	
+}
+
+function create_shader(id,type)
+{
+	//シェーダ生成
+	let shader_src = document.getElementById(id);
+	let shader     = g_gl.createShader(type);
+	
+	//生成したシェーダにソースを割り当てる
+	g_gl.shaderSource(shader,shader_src.text);
+	
+	//シェーダをコンパイルする
+	g_gl.compileShader(shader);
+	
+	//コンパイルできたかをチェック
+	if(!g_gl.getShaderParameter(shader,g_gl.COMPILE_STATUS))
+	{
+		//NGなのでログを表示
+		alert(g_gl.getShaderInfoLog(shader));
+	}
+	
+	return shader;
+}
+
+function setup_shader()
+{
+	//シェーダ類の準備
+	
+	//深度テストとカリングをOFFにする
+	g_gl.disable(g_gl.DEPTH_TEST);
+    g_gl.disable(g_gl.CULL_FACE);
+    
+	//クリア色設定
+	g_gl.clearColor(0,0,0,1);
+	
+	//頂点シェーダとフラグメントシェーダの生成(コンパイルまでしておく)
+	let vs_main = create_shader('vshader-main',g_gl.VERTEX_SHADER);
+	let fs_main = create_shader('fshader-main',g_gl.FRAGMENT_SHADER);
+	
+	//プログラムオブジェクトの生成
+	g_prog_main = g_gl.createProgram();
+	
+	//プログラムオブジェクトにシェーダを割り当てる
+	g_gl.attachShader(g_prog_main,vs_main);
+	g_gl.attachShader(g_prog_main,fs_main);
+	
+	const progs = [ g_prog_main ];
+	for(let i = 0;i < progs.length;++i)
+	{
+		//シェーダをリンク
+		g_gl.linkProgram(progs[i]);
+		
+		//リンクできたかをチェック
+		if(!g_gl.getProgramParameter(progs[i],g_gl.LINK_STATUS))
+	    {
+			//NGなのでログを表示
+			alert(g_gl.getProgramInfoLog(progs[i]));
+	    }
+	}
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メインパス用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	g_gl.useProgram(g_prog_main);
+    g_gl.viewport(0,0,sc_w,sc_h);
+	
+	//バッファオブジェクトとデータを準備しておく
+	const pos = [ -1.0,1.0,0.0, -1.0,-1.0,0.0, 1.0, 1.0,0.0,  
+			       1.0,1.0,0.0, -1.0,-1.0,0.0, 1.0,-1.0,0.0 ];
+	g_vbo_main.vtx_pos_buff = g_gl.createBuffer();
+	g_vbo_main.vtx_pos_data = new Float32Array(pos);
+	
+	//バッファオブジェクトを関連付ける
+	const aloc_pos = g_gl.getAttribLocation(g_prog_main,'vtx_pos');
+
+	//vtx_pos
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_pos_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_pos_data,g_gl.STATIC_DRAW);
+	g_gl.vertexAttribPointer(aloc_pos,3,g_gl.FLOAT,false,0,0);
+	g_gl.enableVertexAttribArray(aloc_pos);
+
+	//uniformデータの準備
+	const uloc_calc_max   = g_gl.getUniformLocation(g_prog_main,'calc_max');
+	const uloc_sc_w_ratio = g_gl.getUniformLocation(g_prog_main,'sc_w_ratio');
+	const uloc_sc_h_ratio = g_gl.getUniformLocation(g_prog_main,'sc_h_ratio');
+
+	g_gl.uniform1f(uloc_calc_max,CALC_MAX);
+	g_gl.uniform1f(uloc_sc_w_ratio,1.0 / sc_w);
+	g_gl.uniform1f(uloc_sc_h_ratio,1.0 / sc_h);
+
+
+	//メイン画面のContextを取得しておく
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//WebGLの準備
+	g_gl = g_webgl_screen.getContext('webgl2');
+	
+	//シェーダの準備
+	setup_shader();
+	
+	//オブジェクトの準備
+	setup_obj();
+
+	//最初の値を決める
+	reset();
+	
+}
+
+function reset()
+{
+	//ターゲット選択
+	
+	g_base_hue   = rnd(360);
+
+	g_start_time = 0;
+	g_pos_r      = 0;
+	g_pos_i      = 0;
+	g_target_end = 0;
+	g_last_draw  = 0;
+	g_cnt        = 0;
+	
+	//注目する座標を決める
+	const sc_w     = g_game_width;
+	const sc_h     = g_game_height;
+	let   zoom     = 1.0;			//拡大率
+	let   pos_list = [];
+	for(let i = 0;i < sc_h;++i)		//複素平面の虚軸
+	{
+		let i_pos = sc_w * i;
+		for(let r = 0;r < sc_w;++r)	//複素平面の実軸
+		{
+			//画面の解像度で正規化して利用
+			const tr = ((r / sc_w) - 0.6 ) / zoom;
+			const ti = ((i / sc_w) - 0.25) / zoom;
+			
+			//発散するまでの回数を調べる
+			const calc_max = CALC_MAX / 1;
+			let x = 0;
+			let y = 0;
+			let n = 0;
+			for(;n < calc_max;++n)
+			{
+				const xx = (x * x) - (y * y) + tr;
+				const yy = 2.0 * x * y + ti;
+				x = xx;
+				y = yy;
+				
+				//発散すると判断できるか？
+				if(((x * x) + (y * y)) > 4)
+				{	break;	}
+			}
+		
+			if(n < calc_max)
+			{
+				const nr = n / calc_max;
+				
+				//かろうじて発散するところを覚えておく
+				if((0.88 < nr) && (nr < 0.9))
+				{
+					pos_list.push({ r:tr,i:ti });
+				}
+			}
+		}
+	}
+	
+	//ターゲット位置を決定する
+	const pos  = rnd(pos_list.length);
+	g_target_r = pos_list[pos].r;
+	g_target_i = pos_list[pos].i;
+	g_pos_dr   = g_target_r / MOVE_TIMES;
+	g_pos_di   = g_target_i / MOVE_TIMES;
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+	}
+	
+	if((g_time - g_last_draw) >= 50)
+	{
+		//経過時間計算
+		const t  = (g_time - g_start_time);
+		const tz = g_cnt / 200;
+		const tp = 2 + g_cnt / 20;
+		
+		//拡大率決定
+		const zoom = 0.25 + Math.pow(tz,tp);
+		
+		//シェーダにパラメータをセット
+		const uloc_base_hue   = g_gl.getUniformLocation(g_prog_main,'base_hue');
+		const uloc_cnt        = g_gl.getUniformLocation(g_prog_main,'cnt');
+		const uloc_zoom_ratio = g_gl.getUniformLocation(g_prog_main,'zoom_ratio');
+		const uloc_pos_r      = g_gl.getUniformLocation(g_prog_main,'pos_r');
+		const uloc_pos_i      = g_gl.getUniformLocation(g_prog_main,'pos_i');
+		
+		g_gl.uniform1f(uloc_base_hue  ,g_base_hue);
+		g_gl.uniform1f(uloc_cnt       ,g_cnt);
+		g_gl.uniform1f(uloc_zoom_ratio,1.0 / zoom);
+		g_gl.uniform1f(uloc_pos_r     ,g_pos_r);
+		g_gl.uniform1f(uloc_pos_i     ,g_pos_i);
+		
+		//シェーダでの描画実行
+		const vertex_num = 6;
+		g_gl.clear(g_gl.COLOR_BUFFER_BIT);
+		g_gl.drawArrays(g_gl.TRIANGLES,0,vertex_num);
+		g_gl.flush();
+		
+		
+		//ターゲットの更新
+		if(g_cnt < MOVE_TIMES)
+		{
+			g_pos_r+= g_pos_dr;
+			g_pos_i+= g_pos_di;
+		}
+		
+		//ターゲット終了チェック
+		if((g_cnt > 360) && (g_target_end == 0))
+		{
+			g_target_end = g_time;
+		}
+
+		//WebGL用のcanvasから表示用の2Dcanvasに転送
+		g_screen_ctx.drawImage(g_webgl_screen,0,0);
+		g_last_draw = g_time;
+		g_cnt++;
+		
+		//フェードイン
+		if(t < 500)
+		{
+			g_screen_ctx.save();
+			g_screen_ctx.fillStyle = "rgba(0,0,0,"+(1.0 - t / 500)+")";
+			g_screen_ctx.fillRect(0,0,sc_w,sc_h);
+			g_screen_ctx.restore();
+		}
+		//フェードアウト
+		if(g_target_end != 0)
+		{
+			let fo = (g_time - g_target_end) / 1000;
+			if(fo >= 1.0)
+			{
+				//リセットを掛けておく
+				reset();
+				fo = 1.0;
+			}
+			
+			g_screen_ctx.save();
+			g_screen_ctx.fillStyle = "rgba(0,0,0,"+fo+")";
+			g_screen_ctx.fillRect(0,0,sc_w,sc_h);
+			g_screen_ctx.restore();
+		}
+	}
+
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
