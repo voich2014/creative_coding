@@ -1,0 +1,807 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのジュリア集合R(WebGL)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、ジュリア集合をJavaScriptのCanvasで描画します。
+	
+	このWebGL版では、GPUでジュリア集合の計算をしています。
+	
+	RではColormindから自動取得したパレット色を使って配色を
+	工夫しています。
+	また、計算回数も拡大するに従って更に増やすようにしてみました。
+	
+	ジュリア集合(Wikipedia)
+	https://ja.wikipedia.org/wiki/%E3%82%B8%E3%83%A5%E3%83%AA%E3%82%A2%E9%9B%86%E5%90%88
+	※ここには漸化式載っていない…
+	
+	ジュリア集合はマンデルブロ集合と似てるようですが、以下のサイトに
+	比較が掲載されていました。
+	http://mt-soft.sakura.ne.jp/kyozai/excel_vba/320_vba_high/11_julia/main.html
+	
+	
+	ジュリア集合の漸化式(ぜんかしき)は、マンデルブロ集合と同じですが、
+	Cの値が固定で、Z0の初期値が0+0i固定ではなく変化する、という違いが
+	あるようです。
+	
+	漸化式
+	Zn+1 = Zn^2 + C
+	
+	このZnを点(Xn,Yn)に、Cを点(a,b)に置き換えると、
+	
+	Xn+1 = Xn^2 - Yn^2 + a
+	Yn+1 = 2 * Xn*Yn + b
+	
+	になるようです。
+	
+	マンデルブロ集合の場合、X0とY0は0から始まり、aとbを変化させて
+	いましたが、ジュリア集合では、aとbが固定で、X0とY0を変化させる
+	という計算になるみたい。
+	
+	発散するかどうかの判断式(x^2+y^2) > 4)はマンデルブロ集合と
+	同じで、配色方法も同じ様に考えられます。
+
+
+	実装方法に関しては、下記のサイトの説明を参考に実装しました。
+	ありがとうございます！
+	http://mt-soft.sakura.ne.jp/kyozai/excel_vba/320_vba_high/11_julia/main.html
+	https://wgld.org/d/glsl/g006.html
+	http://www.natural-science.or.jp/article/20090506174421.php
+	https://qiita.com/anmitsu/items/0f85a6427b4224a2d56a
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.5.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.1.0.js"></script>
+
+<style type="text/css">
+<!--
+
+	#calc
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:60px;
+		z-index: 100;
+	}
+
+	#ab
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:40px;
+		z-index: 100;
+	}
+	
+	#zoom
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:20px;
+		z-index: 100;
+	}
+
+-->
+</style>
+
+<!-- WebGLのシェーダ定義 -->
+<script id="vshader-main" type="x-shader/x-vertex">#version 300 es
+	//頂点シェーダ
+	in vec3 vtx_pos;			//頂点の座標
+	
+	void main(void)
+	{
+		//座標はそのまま伝える
+		gl_Position = vec4(vtx_pos,1.0);
+	}
+</script>
+
+<script id="fshader-main" type="x-shader/x-fragment">#version 300 es
+    //フラグメントシェーダ
+    precision highp float;
+    
+    uniform float calc_max;
+    uniform float cnt;
+
+    uniform float jl_left;		//複素平面の
+    uniform float jl_top;		//左上座標
+    uniform float step_r;		//現在の拡大率での横方向移動量
+    uniform float step_i;		//現在の拡大率での縦方向移動量
+    uniform float offset_r;		//注目画素への
+    uniform float offset_i;		//オフセット量
+    uniform float C_a;			//固定パラメータa
+    uniform float C_b;			//固定パラメータb
+    uniform vec3 col1;			//色１
+    uniform vec3 col2;			//色２
+    uniform vec3 col3;			//色３
+    uniform vec3 col4;			//色４
+    uniform vec3 col5;			//色５
+    
+    out vec4 f_color;			//フラグメントシェーダとしての出力色
+    
+    //  Function from Iñigo Quiles
+	//  https://www.shadertoy.com/view/MsS3Wc
+	vec3 hsb2rgb( in vec3 c )
+	{
+	    vec3 rgb = clamp(abs(mod(c.x*6.0+vec3(0.0,4.0,2.0),
+	                             6.0)-3.0)-1.0,
+	                     0.0,
+	                     1.0 );
+	    rgb = rgb*rgb*(3.0-2.0*rgb);
+	    return c.z * mix(vec3(1.0), rgb, c.y);
+	}
+	
+    void main(void)
+    {
+    	float tr = jl_left + (gl_FragCoord.x * step_r);	//複素平面の虚軸
+    	float ti = jl_top  + (gl_FragCoord.y * step_i);	//複素平面の虚軸
+		float cr = offset_r + tr;
+		float ci = offset_i + ti;
+
+		//発散するまでの回数を調べる
+		float x = cr;
+		float y = ci;
+		float n = 0.0;
+		for(;n < calc_max;++n)
+		{
+			float xx = (x * x) - (y * y) + C_a;
+			float yy = 2.0 * x * y + C_b;
+			x = xx;
+			y = yy;
+			
+			//発散すると判断できるか？
+			if(((x * x) + (y * y)) > 4.0)
+			{	break;	}
+		}
+	
+		//発散しなかったら黒
+		vec3 col = vec3(0.0);
+		if(n < calc_max)
+		{
+			float xm  = mod(gl_FragCoord.x,2.0);
+			float ym  = mod(gl_FragCoord.y,2.0);
+			float nr  = n / calc_max;
+		
+			if(nr > 0.8)
+			{	col = mix(col5,col1,(nr-0.8)/0.2);		}
+			if(nr > 0.5)
+			{	col = mix(col4,col5,(nr-0.5)/0.3);		}
+			else if(nr > 0.2)
+			{	col = mix(col3,col4,(nr-0.2)/0.5);		}
+			else if(nr > 0.05)
+			{	col = mix(col2,col3,(nr-0.05)/0.15);	}
+			else
+			{	col = mix(col1,col2,nr/0.05);			}
+	
+			float h = mod(col.x + cnt / 400.0,1.0);
+			col = hsb2rgb(vec3(h,col.y,max(col.z/* - (xm * 0.4 - ym * 0.4)*/,0.0)));
+		}
+ 
+		f_color = vec4(clamp(col,0.0,1.0),1.0);
+	}
+</script>
+
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 320;
+
+let g_webgl_screen  = null;
+let g_gl            = null;
+let g_prog_main     = null;
+let g_vbo_main      = {};
+
+let g_time   = 0;						//現在時刻[ms]
+let g_dtime  = 0;						//前回の描画からの経過時間[ms]
+
+//ジュリア集合のr(実軸)の範囲は、-1.6 ～ 1.6
+//              i(虚軸)の範囲は、-1.6 ～ 1.6 にしました
+const JULIA_R_MIN       = -1.6;
+const JULIA_R_MAX       =  1.6;
+const JULIA_I_MIN       = -1.6;
+const JULIA_I_MAX       =  1.6;
+const JULIA_R_DISTANCE  = JULIA_R_MAX - JULIA_R_MIN;
+const JULIA_I_DISTANCE  = JULIA_I_MAX - JULIA_I_MIN;
+const JULIA_A_MIN       = -0.54;
+const JULIA_A_MAX       =  0.15;
+const JULIA_B_MIN       = -0.62;
+const JULIA_B_MAX       =  0.62;
+const JULIA_A_DISTANCE  = JULIA_A_MAX - JULIA_A_MIN;
+const JULIA_B_DISTANCE  = JULIA_B_MAX - JULIA_B_MIN;
+
+const CALC_MAX      = 300;
+const MOVE_TIMES    = 200;
+let g_screen_ctx    = null;
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_ease          = null;
+let g_pos_r         = 0;
+let g_pos_i         = 0;
+let g_pos_dr        = 0;
+let g_pos_di        = 0;
+let g_target_r      = 0;
+let g_target_i      = 0;
+let g_target_end    = 0;
+let g_last_draw     = 0;
+let g_colors        = [];
+let g_c_a           = 0;
+let g_c_b           = 0;
+let g_default_ab    = [];
+
+let g_def_colors    = [];
+let g_start_colors  = [];
+let g_next_colors   = [];
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+let g_cnt = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 480;
+		g_game_height = 480;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//WebGL用のCanvasもスクリーンと同じサイズで用意
+	g_webgl_screen        = document.createElement("canvas");
+	g_webgl_screen.width  = g_game_width;
+	g_webgl_screen.height = g_game_height;
+	
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+	//最初にアルファ値が255になるように埋める
+	g_offsc.data.fill(255);
+	
+}
+
+function create_shader(id,type)
+{
+	//シェーダ生成
+	let shader_src = document.getElementById(id);
+	let shader     = g_gl.createShader(type);
+	
+	//生成したシェーダにソースを割り当てる
+	g_gl.shaderSource(shader,shader_src.text);
+	
+	//シェーダをコンパイルする
+	g_gl.compileShader(shader);
+	
+	//コンパイルできたかをチェック
+	if(!g_gl.getShaderParameter(shader,g_gl.COMPILE_STATUS))
+	{
+		//NGなのでログを表示
+		alert(g_gl.getShaderInfoLog(shader));
+	}
+	
+	return shader;
+}
+
+function setup_shader()
+{
+	//シェーダ類の準備
+	
+	//深度テストとカリングをOFFにする
+	g_gl.disable(g_gl.DEPTH_TEST);
+    g_gl.disable(g_gl.CULL_FACE);
+    
+	//クリア色設定
+	g_gl.clearColor(0,0,0,1);
+	
+	//頂点シェーダとフラグメントシェーダの生成(コンパイルまでしておく)
+	let vs_main = create_shader('vshader-main',g_gl.VERTEX_SHADER);
+	let fs_main = create_shader('fshader-main',g_gl.FRAGMENT_SHADER);
+	
+	//プログラムオブジェクトの生成
+	g_prog_main = g_gl.createProgram();
+	
+	//プログラムオブジェクトにシェーダを割り当てる
+	g_gl.attachShader(g_prog_main,vs_main);
+	g_gl.attachShader(g_prog_main,fs_main);
+	
+	const progs = [ g_prog_main ];
+	for(let i = 0;i < progs.length;++i)
+	{
+		//シェーダをリンク
+		g_gl.linkProgram(progs[i]);
+		
+		//リンクできたかをチェック
+		if(!g_gl.getProgramParameter(progs[i],g_gl.LINK_STATUS))
+	    {
+			//NGなのでログを表示
+			alert(g_gl.getProgramInfoLog(progs[i]));
+	    }
+	}
+
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//メインパス用の準備
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	g_gl.useProgram(g_prog_main);
+    g_gl.viewport(0,0,sc_w,sc_h);
+	
+	//バッファオブジェクトとデータを準備しておく
+	const pos = [ -1.0,1.0,0.0, -1.0,-1.0,0.0, 1.0, 1.0,0.0,  
+			       1.0,1.0,0.0, -1.0,-1.0,0.0, 1.0,-1.0,0.0 ];
+	g_vbo_main.vtx_pos_buff = g_gl.createBuffer();
+	g_vbo_main.vtx_pos_data = new Float32Array(pos);
+	
+	//バッファオブジェクトを関連付ける
+	const aloc_pos = g_gl.getAttribLocation(g_prog_main,'vtx_pos');
+
+	//vtx_pos
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_pos_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_pos_data,g_gl.STATIC_DRAW);
+	g_gl.vertexAttribPointer(aloc_pos,3,g_gl.FLOAT,false,0,0);
+	g_gl.enableVertexAttribArray(aloc_pos);
+
+	//uniformデータの準備
+	const uloc_calc_max   = g_gl.getUniformLocation(g_prog_main,'calc_max');
+
+	g_gl.uniform1f(uloc_calc_max,CALC_MAX);
+
+	//メイン画面のContextを取得しておく
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+	//色の器を準備
+	g_colors.push(new Float32Array(3));
+	g_colors.push(new Float32Array(3));
+	g_colors.push(new Float32Array(3));
+	g_colors.push(new Float32Array(3));
+	g_colors.push(new Float32Array(3));
+	
+	//デフォルトのa,bパラメータ値を準備
+	g_default_ab.push({ a:-0.3700, b:-0.6120 });
+	g_default_ab.push({ a:-0.4789, b:-0.5643 });
+	g_default_ab.push({ a:-0.5280, b: 0.5477 });
+	g_default_ab.push({ a:-0.4302, b:-0.5872 });
+	g_default_ab.push({ a:-0.3418, b: 0.6113 });
+	g_default_ab.push({ a: 0.1382, b:-0.6125 });
+	g_default_ab.push({ a:-0.4260, b: 0.5684 });
+	g_default_ab.push({ a: 0.1056, b: 0.6022 });
+	g_default_ab.push({ a:-0.4733, b:-0.5405 });
+	g_default_ab.push({ a:-0.4739, b:-0.5773 });
+	g_default_ab.push({ a:-0.4098, b:-0.6048 });
+	g_default_ab.push({ a:-0.4051, b:-0.5960 });
+	g_default_ab.push({ a:-0.4457, b:-0.6001 });
+	g_default_ab.push({ a:-0.5160, b:-0.5360 });
+	g_default_ab.push({ a: 0.1088, b:-0.6091 });
+	g_default_ab.push({ a:-0.3612, b:-0.6161 });
+	g_default_ab.push({ a:-0.4830, b:-0.5512 });
+	g_default_ab.push({ a: 0.1392, b:-0.6063 });
+	g_default_ab.push({ a:-0.5355, b: 0.5069 });
+	g_default_ab.push({ a: 0.1472, b: 0.5933 });
+	g_default_ab.push({ a:-0.4420, b: 0.5802 });
+	g_default_ab.push({ a: 0.1272, b: 0.6136 });
+	g_default_ab.push({ a:-0.5285, b: 0.5167 });
+	g_default_ab.push({ a:-0.5304, b:-0.5194 });
+	g_default_ab.push({ a:-0.4079, b: 0.6171 });
+	g_default_ab.push({ a:-0.4107, b: 0.5929 });
+	g_default_ab.push({ a: 0.1110, b:-0.6015 });
+	g_default_ab.push({ a:-0.4206, b: 0.6171 });
+	g_default_ab.push({ a:-0.4587, b:-0.5685 });
+	g_default_ab.push({ a:-0.4795, b: 0.5869 });
+	
+	//coolors.co URLからデフォルトパレットを生成
+	const url = "https://coolors.co/642ca9-ff36ab-ff74d4-ffb8de-ffdde1";
+	g_def_colors = createPaletteNHSL(url);
+
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//WebGLの準備
+	g_gl = g_webgl_screen.getContext('webgl2');
+	
+	//シェーダの準備
+	setup_shader();
+	
+	//オブジェクトの準備
+	setup_obj();
+
+	//最初の値を決める
+	g_next_colors = g_def_colors.slice();
+	reset();
+	
+}
+
+function reset()
+{
+	//ターゲット選択
+
+	g_start_time = 0;
+	g_pos_r      = 0;
+	g_pos_i      = 0;
+	g_target_end = 0;
+	g_last_draw  = 0;
+	g_cnt        = 0;
+	
+	//注目する座標を決める
+	const sc_w     = g_game_width;
+	const sc_h     = g_game_height;
+	let   zoom     = 1.0;			//拡大率
+	let   pos_list = [];
+	
+	//現在の拡大率から画面左上の座標と
+	//1ピクセル辺りの移動量を計算
+	const zr       = 1.0 / zoom;
+	const jl_w     = JULIA_R_DISTANCE;
+	const jl_h     = JULIA_I_DISTANCE;
+	const jl_w2    = jl_w / 2;
+	const jl_h2    = jl_h / 2;
+	const jl_left  = (JULIA_R_MIN + jl_w2) - jl_w2 * zr;
+	const jl_top   = (JULIA_I_MIN + jl_h2) - jl_h2 * zr;
+	const jl_wzr   = jl_w * zr;
+	const jl_hzr   = jl_h * zr
+	const step_w   = jl_wzr / sc_w;
+	const step_h   = jl_hzr / sc_h;
+	
+	//注目する候補が見つからない場合が多いので
+	//繰り返しパラメータを探す
+	let last = 10;
+	while((last-- >= 0) && (pos_list.length == 0))
+	{
+		//パラメータa,bを決定
+		g_c_a = JULIA_A_MIN + rnd(JULIA_A_DISTANCE * 10000.0) / 10000.0;
+		g_c_b = JULIA_B_MIN + rnd(JULIA_B_DISTANCE * 10000.0) / 10000.0;
+		
+		//スマホでランダムサーチするとたまにフリーズするので、
+		//デフォルトから選択させる	
+		//if(last == 0)
+		{
+			//最後はあらかじめ候補ができるのが判っている値にする
+			const def = rnd(g_default_ab.length);
+			g_c_a = g_default_ab[def].a;
+			g_c_b = g_default_ab[def].b;
+		}
+	
+		for(let i = 0;i < sc_h;++i)		//複素平面の虚軸
+		{
+			for(let r = 0;r < sc_w;++r)	//複素平面の実軸
+			{
+				const tr = jl_left + (r * step_w);
+				const ti = jl_top  + (i * step_h);
+				
+				//発散するまでの回数を調べる
+				const calc_max = CALC_MAX;
+				let x = tr;
+				let y = ti;
+				let n = 0;
+				for(;n < calc_max;++n)
+				{
+					const xx = (x * x) - (y * y) + g_c_a;
+					const yy = 2.0 * x * y + g_c_b;
+					x = xx;
+					y = yy;
+					
+					//発散すると判断できるか？
+					if(((x * x) + (y * y)) > 4)
+					{	break;	}
+				}
+			
+				if(n < calc_max)
+				{
+					const nr = n / calc_max;
+					
+					//注目する候補として覚えておく
+					if((0.75 < nr) && (nr < 0.99))
+					{
+						pos_list.push({ r:r,i:i });
+					}
+				}
+			}
+		}
+	}
+	
+	let ab_div = document.getElementById("ab");
+	ab_div.innerText = "(a,b):("+g_c_a+", "+g_c_b+")";
+	
+	//ターゲット位置を決定する
+	const pos  = rnd(pos_list.length);
+	g_target_r = (pos_list[pos].r * step_w) - jl_w2 * zr;
+	g_target_i = (pos_list[pos].i * step_h) - jl_h2 * zr;
+	g_pos_dr   = g_target_r / MOVE_TIMES;
+	g_pos_di   = g_target_i / MOVE_TIMES;
+	
+	//配色を決める
+	reset_color();
+
+}
+
+function reset_color()
+{
+	//配色色を決定します
+	
+	//パレットを決定
+	g_start_colors = g_next_colors.slice();	//配列の値渡しコピー
+	g_next_colors  = g_def_colors.slice();	//次のパレットの初期値とする
+	getColormind(function(palette)
+	{
+		//Colormindから5色のパレットを取得
+		g_next_colors = rgbAA2hslNA(palette);		
+	});
+	
+	//正規化されたHSLオブジェクトからFloat32Arrayに移し替え
+	for(let i = 0;i < g_start_colors.length;++i)
+	{
+		if(i&1)
+		{
+			//奇数色の色をずらす
+			g_start_colors[i].h = (g_start_colors[i].h + 0.4 + rnd(40)/100) % 1.0;
+			g_start_colors[i].s = (g_start_colors[i].s + 0.4 + rnd(40)/100) % 1.0;
+			g_start_colors[i].l = (g_start_colors[i].l + 0.4 + rnd(40)/100) % 1.0;
+		}
+		
+		g_colors[i][0] = g_start_colors[i].h;
+		g_colors[i][1] = g_start_colors[i].s;
+		g_colors[i][2] = g_start_colors[i].l;
+	}
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+	}
+	
+	if((g_time - g_last_draw) >= 30)
+	{
+		//経過時間計算
+		const t  = (g_time - g_start_time);
+		const tz = g_cnt / 190;
+		const tp = 2 + g_cnt / 30;
+				
+		//拡大率決定
+		let zoom     = 0.7 + Math.pow(tz,tp);
+		let zoom_div = document.getElementById("zoom");
+		zoom_div.innerText = "zoom:×"+zoom;
+		
+		//現在の拡大率から画面左上の座標と
+		//1ピクセル辺りの移動量を計算
+		const zr       = 1.0 / zoom;
+		const jl_w     = JULIA_R_DISTANCE;
+		const jl_h     = JULIA_I_DISTANCE;
+		const jl_w2    = jl_w / 2;
+		const jl_h2    = jl_h / 2;
+		const jl_left  = (JULIA_R_MIN + jl_w2) - jl_w2 * zr;
+		const jl_top   = (JULIA_I_MIN + jl_h2) - jl_h2 * zr;
+		const jl_wzr   = jl_w * zr;
+		const jl_hzr   = jl_h * zr
+		const step_r   = jl_wzr / sc_w;
+		const step_i   = jl_hzr / sc_h;
+	
+		//発散までの計算回数(拡大していく程に増えていきます)
+		let calc_max = Math.floor(CALC_MAX + g_cnt / 2);
+		let calc_div = document.getElementById("calc");
+		calc_div.innerText = "calc_max:"+calc_max;
+		
+		//シェーダにパラメータをセット
+		const uloc_calc_max = g_gl.getUniformLocation(g_prog_main,'calc_max');
+		const uloc_cnt      = g_gl.getUniformLocation(g_prog_main,'cnt');
+		const uloc_jl_left  = g_gl.getUniformLocation(g_prog_main,'jl_left');
+		const uloc_jl_top   = g_gl.getUniformLocation(g_prog_main,'jl_top');
+		const uloc_step_r   = g_gl.getUniformLocation(g_prog_main,'step_r');
+		const uloc_step_i   = g_gl.getUniformLocation(g_prog_main,'step_i');
+		const uloc_offset_r = g_gl.getUniformLocation(g_prog_main,'offset_r');
+		const uloc_offset_i = g_gl.getUniformLocation(g_prog_main,'offset_i');
+		const uloc_C_a      = g_gl.getUniformLocation(g_prog_main,'C_a');
+		const uloc_C_b      = g_gl.getUniformLocation(g_prog_main,'C_b');
+		const uloc_col1     = g_gl.getUniformLocation(g_prog_main,'col1');
+		const uloc_col2     = g_gl.getUniformLocation(g_prog_main,'col2');
+		const uloc_col3     = g_gl.getUniformLocation(g_prog_main,'col3');
+		const uloc_col4     = g_gl.getUniformLocation(g_prog_main,'col4');
+		const uloc_col5     = g_gl.getUniformLocation(g_prog_main,'col5');
+		
+		g_gl.uniform1f(uloc_calc_max,calc_max);
+		g_gl.uniform1f(uloc_cnt     ,g_cnt);
+		g_gl.uniform1f(uloc_jl_left ,jl_left);
+		g_gl.uniform1f(uloc_jl_top  ,jl_top);
+		g_gl.uniform1f(uloc_step_r  ,step_r);
+		g_gl.uniform1f(uloc_step_i  ,step_i);
+		g_gl.uniform1f(uloc_offset_r,g_pos_r);
+		g_gl.uniform1f(uloc_offset_i,g_pos_i);
+		g_gl.uniform1f(uloc_C_a,     g_c_a);
+		g_gl.uniform1f(uloc_C_b,     g_c_b);
+		g_gl.uniform3fv(uloc_col1   ,g_colors[0]);
+		g_gl.uniform3fv(uloc_col2   ,g_colors[1]);
+		g_gl.uniform3fv(uloc_col3   ,g_colors[2]);
+		g_gl.uniform3fv(uloc_col4   ,g_colors[3]);
+		g_gl.uniform3fv(uloc_col5   ,g_colors[4]);
+		
+		//シェーダでの描画実行
+		const vertex_num = 6;
+		g_gl.clear(g_gl.COLOR_BUFFER_BIT);
+		g_gl.drawArrays(g_gl.TRIANGLES,0,vertex_num);
+		g_gl.flush();
+		
+		
+		//ターゲットの更新
+		if(g_cnt < MOVE_TIMES)
+		{
+			g_pos_r+= g_pos_dr;
+			g_pos_i+= g_pos_di;
+		}
+		
+		//ターゲット終了チェック
+		if((g_cnt > 400) && (g_target_end == 0))
+		{
+			g_target_end = g_time;
+		}
+
+		//WebGL用のcanvasから表示用の2Dcanvasに転送
+		g_screen_ctx.drawImage(g_webgl_screen,0,0);
+		g_last_draw = g_time;
+		g_cnt++;
+
+		//フェードイン
+		if(t < 500)
+		{
+			g_screen_ctx.save();
+			g_screen_ctx.fillStyle = "rgba(0,0,0,"+(1.0 - t / 500)+")";
+			g_screen_ctx.fillRect(0,0,sc_w,sc_h);
+			g_screen_ctx.restore();
+		}
+		//フェードアウト
+		if(g_target_end != 0)
+		{
+			let fo = (g_time - g_target_end) / 1000;
+			if(fo >= 1.0)
+			{
+				//リセットを掛けておく
+				reset();
+				fo = 1.0;
+			}
+			
+			g_screen_ctx.save();
+			g_screen_ctx.fillStyle = "rgba(0,0,0,"+fo+")";
+			g_screen_ctx.fillRect(0,0,sc_w,sc_h);
+			g_screen_ctx.restore();
+		}
+	}
+
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="calc"></div>
+	<div id="ab"></div>
+	<div id="zoom"></div>
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
