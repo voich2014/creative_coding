@@ -73,7 +73,8 @@ creative_coding/
 - 030.`awave2`：[パパのAlphaWave2](https://voich2014.github.io/creative_coding/src/awave2/index6.html)
 - 031.`att`：[パパのウロボロスドラゴンテイル](https://voich2014.github.io/creative_coding/src/att/index2.html)
 - 032.`mand`：[パパのマンデルブロ集合](https://voich2014.github.io/creative_coding/src/mand/index4.html)
-- 033.`julia`：[パパのジュリア集合](https://voich2014.github.io/creative_coding/src/julia/index2.html)
+ - 033.`julia`：[パパのジュリア集合](https://voich2014.github.io/creative_coding/src/julia/index2.html)
+ - 034.`lenti`：[パパのレンチキュラー](https://voich2014.github.io/creative_coding/src/lenti/index2.html)
 
 
 ---
