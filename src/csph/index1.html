@@ -1,0 +1,455 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの間違った球体</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモは、JavaScriptでWebGLも使わずに、自力3D計算でオブジェクトを
+	表示しようという試みです。
+	
+	今回は、マット・ピアソン 著 [普及版]ジェネラティブ・アート
+	Processingによる実践ガイドの「5.3.3 球を描く間違った方法」を
+	参考にしてみました。 
+
+	マット・ピアソンさんに圧倒的感謝を！
+	
+	Copyright (c) 2020 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.2.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.0.0.js"></script>
+
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_offsc;				//自力描画用オフスクリーン
+let g_draw_algo;			//選択中の描画アルゴリズムインデックス
+let g_renderingman;			//レンダリング担当
+
+let g_cube_model;			//立方体用モデル情報
+let g_time   = 0;			//現在時刻[ms]
+let g_dtime  = 0;			//前回の描画からの経過時間[ms]
+
+let g_pn = new Perlin();
+
+//Processing互換定数
+const TAU = 2.0 * Math.PI;
+
+const CUBE_NUM       = 360;
+const ANGLE_PER_TIME = 0.02;
+const MORPH_TIME     = 5000;
+const S_MIN          = 1.0;
+const S_MAX          = 2.0;
+const D_MIN          = 5;
+const D_MAX          = 20;
+const r_MIN          = 5.0;
+const r_MAX          = 10.0;
+const a_MIN          = 0.05;
+const a_MAX          = 0.20;
+const b_MIN          = 0.01;
+const b_MAX          = 1.20;
+
+let g_start_time     = 0;
+let g_next_time      = 0;
+let g_start_S        = 0;
+let g_next_S         = 0;
+let g_start_D        = 0;
+let g_next_D         = 0;
+let g_start_r        = 0;
+let g_next_r         = 0;
+let g_start_a        = 0;
+let g_next_a         = 0;
+let g_start_b        = 0;
+let g_next_b         = 0;
+let g_c              = 0;
+let g_ns             = 0;
+let g_nr             = 0;
+
+let g_last_fps_time  = 0;
+let g_fps_count      = 0;
+let g_fps            = 60;
+let g_fps_list       = [];
+let g_fps_visible    = true;
+
+let g_cnt            = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//描画処理方法を準備
+	g_draw_algo = -1;
+	change_draw_algorithm();
+	window.onmousedown = change_draw_algorithm;
+	window.ontouchdown = change_draw_algorithm;
+	
+	//クリックorタップでFPSの表示ON/OFF
+	toggle_fps_visible();
+	window.onmousedown = toggle_fps_visible;
+	window.ontouchdown = toggle_fps_visible;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+
+}
+
+function setup_renderer()
+{
+
+	//レンダリング担当の準備
+	const screen     = document.getElementById("game-screen");	//描画先canvas
+	const algo_label = document.getElementById("algo");
+	g_renderingman   = new RenderingMan(screen,g_offsc,algo_label);
+	
+	//ViewPort行列と射影行列をセット
+	let mtx_viewport   = new MatrixMan4();
+	let mtx_projection = new MatrixMan4();
+	
+	mtx_viewport.viewPort(0,0,g_game_width,g_game_height);
+	mtx_projection.projectionOpenGL(NEAR_Z_POS,FAR_Z_POS,rad(60),g_game_width/g_game_height);
+	g_renderingman.setViewPortMatrix(mtx_viewport);
+	g_renderingman.setProjectionMatrix(mtx_projection);
+	
+	//ビュー行列をセット
+	let vFrom    = new VectorMan3(0.0,0.0,200.0);
+	let vTo      = new VectorMan3(0.0,0.0,0.0);
+	let vUp      = new VectorMan3(0.0,1.0,0.0);
+	let mtx_view = new MatrixMan4();
+		
+	mtx_view.view(vFrom,vTo,vUp);
+	g_renderingman.setViewMatrix(mtx_view);
+
+	//拡散光色をセット
+	g_renderingman.setDefuseLightColor(0.8,0.8,0.8);
+	
+	//光源ベクトルをセット
+	const lx = (g_game_width == 1280) ? -1.0 : -2.0;
+	g_renderingman.setLightVector(lx,1.5,-1.0);
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	g_cube_model = new CubeObjMan();
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//レンダリング担当の準備
+	setup_renderer();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//最初の値を決める
+	g_next_S = SL.clamp(rnd(S_MAX+1),S_MIN,S_MAX);
+	g_next_D = SL.clamp(rnd(D_MAX+1),D_MIN,D_MAX);
+	g_next_r = SL.clamp(rnd(r_MAX+1),r_MIN,r_MAX);
+	g_next_a = SL.clamp(rnd(a_MAX*100+1) / 100,a_MIN,a_MAX);
+	g_next_b = SL.clamp(rnd(b_MAX*100+1) / 100,b_MIN,b_MAX);
+	reset();
+
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_S = g_next_S;
+	g_start_D = g_next_D;
+	g_start_r = g_next_r;
+	g_start_a = g_next_a;
+	g_start_b = g_next_b;
+	
+	g_next_S = SL.clamp(rnd(S_MAX+1),S_MIN,S_MAX);
+	g_next_D = SL.clamp(rnd(D_MAX+1),D_MIN,D_MAX);
+	g_next_r = SL.clamp(rnd(r_MAX+1),r_MIN,r_MAX);
+	g_next_a = SL.clamp(rnd(a_MAX*100+1) / 100,a_MIN,a_MAX);
+	g_next_b = SL.clamp(rnd(b_MAX*100+1) / 100,b_MIN,b_MAX);
+	
+	g_c  = (rnd(10) < 3) ? 1 : 0;
+	g_ns = (rnd(10) < 3) ? 1 : 0;
+	g_nr = (rnd(10) < 3) ? 1 : 0;
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function toggle_fps_visible()
+{
+	//FPSの表示をON/OFFします
+	
+	//表示フラグを反転させる
+	g_fps_visible = !g_fps_visible;
+	
+	//表示フラグに合わせてvisible制御
+	let fps_div  = document.getElementById("fps");
+	let algo_div = document.getElementById("algo");
+	fps_div.style.display  = g_fps_visible ? "block" : "none";
+	algo_div.style.display = g_fps_visible ? "block" : "none";
+	
+}
+
+function change_draw_algorithm()
+{
+
+	//描画アルゴリズムの選択
+	
+	g_draw_algo = (g_draw_algo + 1) % 1;
+	
+	switch(g_draw_algo)
+	{
+		case 0:	//フラットシェーディング描画
+			g_renderingman.setupFlatShading();
+			break;
+
+		case 1:	//ContextのLINE描画
+			g_renderingman.setupContextLine();
+			break;
+			
+		case 2:	//ブレゼンハムLINE描画
+			g_renderingman.setupBresenhamLine();
+			break;
+			
+		case 3:	//ダブルステップブレゼンハムLINE描画
+			g_renderingman.setupDoubleStepBresenhamLine();
+			break;
+		
+		case 4:	//アンチエイリアス付きブレゼンハムLINE描画
+			g_renderingman.setupBresenhamLineAA();
+			break;
+	}
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//描画前処理
+	g_renderingman.drawBegin(/*g_renderingman.clearForBlur*/);
+
+	//オブジェクトを動かす
+	let mtx_scale   = new MatrixMan4();
+	let mtx_nscale  = new MatrixMan4();
+	let mtx_rotateX = new MatrixMan4();
+	let mtx_rotateY = new MatrixMan4();
+	let mtx_rotateZ = new MatrixMan4();
+	let mtx_model   = new MatrixMan4();
+	let mtx_pos     = new MatrixMan4();
+	
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e = Ease.easeInExpo(time**5);
+		
+	//オブジェクトのサイズを調整
+	const S = g_start_S + e * (g_next_S - g_start_S);
+	const D = g_start_D + e * (g_next_D - g_start_D);
+	mtx_scale.scale(S,S,S);
+	
+	//回転行列作成
+	const angle = g_time * ANGLE_PER_TIME;
+	mtx_rotateX.rotateX(rad(angle));
+	mtx_rotateZ.rotateZ(rad(angle*3));
+	
+	//たくさんCubeを並べる
+	const r     = g_start_r + e * (g_next_r - g_start_r);
+	const add_a = g_start_a + e * (g_next_a - g_start_a);
+	const add_b = g_start_b + e * (g_next_b - g_start_b);
+	let   c     = angle;
+	let   a     = 0;
+	let   b     = 0;
+	for(let i = 0;i < CUBE_NUM;++i)
+	{
+		//モデル変換行列の初期化
+		mtx_model.initialize();
+		
+		//色を決める
+		c = (g_c == 0)? c : ((a + b) / TAU * 360);
+		let col = hsl2rgb(Math.floor(c),0.9,0.55);
+		g_renderingman.setDefuseLightColor(col.r,col.g,col.b);
+		
+		//ノイズによる乱れを付加
+		const rr = (g_nr == 0) ? r   : (r * (1.0 - (g_pn.perlin(a,b,0) - 0.5) / 2));
+		const ns = (g_ns == 0) ? 1.0 : (1.0 + (g_pn.perlin(a,b,0) - 0.5) * 10.0);
+		mtx_nscale.scale(ns,ns,ns);
+		
+		//移動行列作成
+		const x = rr * Math.cos(a) * Math.sin(b);
+		const y = rr * Math.sin(a) * Math.sin(b);
+		const z = rr * Math.cos(b);
+		
+		mtx_pos.translate(x*D,y*D,z*D);
+		a += add_a;
+		b  = (b + add_b) % Math.PI;
+		
+		//拡大と移動と回転
+		mtx_model.mul(mtx_scale);
+		mtx_model.mul(mtx_nscale);
+		mtx_model.mul(mtx_pos);
+		mtx_model.mul(mtx_rotateX);
+		mtx_model.mul(mtx_rotateZ);
+		
+		//レンダラにセット
+		g_renderingman.setModelMatrix(mtx_model);
+		
+		//オブジェクトの描画
+		g_renderingman.drawIndexedPrimitive(g_cube_model.vertexList,g_cube_model.vertexNum,
+											g_cube_model.polyIndexList,g_cube_model.primitiveNum,
+											null,null,g_cube_model.polyTexUVList);
+	
+	}
+	
+	//描画後処理(画面に転送)
+	g_renderingman.drawEnd(g_renderingman.postBloom);
+	
+	//変形終了時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<div id="algo"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>

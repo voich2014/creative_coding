@@ -1,0 +1,1015 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの間違った球体R(WebGL)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモは、JavaScriptでWebGLを使って、3Dのジェネラティブアート
+	に挑戦しています。
+	
+	今回は、マット・ピアソン 著 [普及版]ジェネラティブ・アート
+	Processingによる実践ガイドの「5.3.3 球を描く間違った方法」を
+	参考にしてみました。 
+
+	マット・ピアソンさんに圧倒的感謝を！
+	
+	また、WebGLでインスタンシングのやり方については、
+	凸撃兵さん(@Stosstruppe)のドミノコースター を参考にさせて頂きました。
+	ありがとうございます！
+	https://twitter.com/Stosstruppe/status/1282870436561326080?s=20
+
+	このWebGL版では、Bloom処理もシェーダ側で行うようにしています。
+	複数パスのシェーダを実行するので、環境によってはドライバ対応の
+	関係で正常に動作しない可能性があります。
+	予めご了承下さい。
+	ぼいちの古いスマホ(Android)では動きませんでした…_(┐「ε:)_
+	
+	Copyright (c) 2020 ぼいち(@voich2014 in Twitter)
+	
+	Released under the MIT license.
+ 	see https://opensource.org/licenses/MIT
+ 	Where a citation is listed, please also check the license of the citing source.
+
+-->
+<link rel="stylesheet" href="./../vlib/vl_common_v1.0.0.css">
+<script type="text/javascript" src="./../vlib/vl_common_v1.2.0.js"></script>
+<script type="text/javascript" src="./../vlib/vl_3d_v1.0.0.js"></script>
+
+<!-- WebGLのシェーダ定義 -->
+<script id="vshader-main" type="x-shader/x-vertex">#version 300 es
+	//メインシーン頂点シェーダ
+	in vec3 vtx_pos;			//頂点の座標
+    in vec3 vtx_normal;			//頂点毎の法線
+    
+    in mat4 obj_model;			//インスタンス毎のモデル変換行列
+    in vec3 obj_color;			//インスタンス毎の色
+    
+    out vec3 v_color;			//出力色
+    
+    uniform   mat4 view;		//ビュー変換行列
+	uniform   mat4 proj;		//射影変換行列
+	uniform   vec3 light_dir;	//光源の方向(正規化済み)
+	
+	void main(void)
+	{
+		//頂点座標を変換して次につなげる
+		gl_Position = proj * view * obj_model * vec4(vtx_pos,1.0);
+	    
+	    //光源と頂点の法線から頂点色を計算する
+	    vec3  normal  = normalize(mat3(obj_model) * vtx_normal);
+	    float diffuse = clamp(dot(normal,light_dir),0.1,1.0);
+	    v_color = clamp(obj_color * diffuse,0.0,1.0);
+	}
+</script>
+
+<script id="fshader-main" type="x-shader/x-fragment">#version 300 es
+    //メインシーンフラグメントシェーダ
+    precision mediump float;
+    
+    in  vec3 v_color;			//頂点シェーダからの出力色
+    out vec4 f_color;			//フラグメントシェーダとしての出力色
+    
+    void main(void)
+    {
+		f_color = vec4(v_color,1.0);
+	}
+</script>
+
+<script id="vshader-gaus" type="x-shader/x-vertex">#version 300 es
+	//ガウシアンフィルタ頂点シェーダ
+	in vec3 vtx_pos;			//頂点の座標
+	
+	void main(void)
+	{
+		//座標はそのまま伝える
+		gl_Position = vec4(vtx_pos,1.0);
+	}
+</script>
+
+<script id="fshader-gaus" type="x-shader/x-fragment">#version 300 es
+    //ガウシアンフィルタフラグメントシェーダ
+    precision mediump float;
+    
+    uniform sampler2D tex;		//参照するテクスチャ
+	
+	//ぼかしは、9x9,21x21,65x65
+	//配列は、中心1ピクセル+幅半分の個数になります。9x9 =1+4 = 5個
+	//受け取り側は最大個数で確保しておきます。     65x65=1+32=33個
+	
+	uniform int   weight_num;
+	uniform float weights[33];
+	uniform bool  is_vertical;
+	uniform float sc_w;
+	uniform float sc_h;
+
+    out vec4 f_color;			//フラグメントシェーダとしての出力色
+    
+    void main(void)
+    {
+    	float ratio_w = 1.0 / sc_w;
+    	float ratio_h = 1.0 / sc_h;
+    	vec2 tc       = vec2(gl_FragCoord.x,sc_h - gl_FragCoord.y);
+    	vec2 ratio    = vec2(ratio_w,ratio_h);
+    	
+    	vec3 color = vec3(0.0);
+    	if(is_vertical)
+    	{
+    		//縦方向ぼかし
+    		color += texture(tex,tc * ratio).rgb *  weights[0];
+    		for(int i = 1;i < weight_num;++i)
+    		{
+    			color += texture(tex,(tc + vec2(0.0,float(-i))) * ratio).rgb *  weights[i];
+    			color += texture(tex,(tc + vec2(0.0,float( i))) * ratio).rgb *  weights[i];
+    		}
+    	}
+    	else
+    	{
+    		//横方向ぼかし
+    		color += texture(tex,tc * ratio).rgb *  weights[0];
+    		for(int i = 1;i < weight_num;++i)
+    		{
+    			color += texture(tex,(tc + vec2(float(-i),0.0)) * ratio).rgb * weights[i];
+    			color += texture(tex,(tc + vec2(float( i),0.0)) * ratio).rgb * weights[i];
+    		}
+    	}
+
+		f_color = vec4(color,1.0);
+	}
+</script>
+
+<script id="vshader-add" type="x-shader/x-vertex">#version 300 es
+	//加算合成頂点シェーダ
+	in vec3 vtx_pos;			//頂点の座標
+	
+	void main(void)
+	{
+		//座標はそのまま伝える
+		gl_Position = vec4(vtx_pos,1.0);
+	}
+</script>
+
+<script id="fshader-add" type="x-shader/x-fragment">#version 300 es
+    //加算合成フラグメントシェーダ
+    precision mediump float;
+    
+    uniform sampler2D tex1;		//元画面テクスチャ
+    uniform sampler2D tex2;		//ぼかし1/2画面テクスチャ
+    uniform sampler2D tex3;		//ぼかし1/4画面テクスチャ
+    uniform sampler2D tex4;		//ぼかし1/8画面テクスチャ
+    
+	uniform float sc_w;
+	uniform float sc_h;
+
+    out vec4 f_color;			//フラグメントシェーダとしての出力色
+    
+    void main(void)
+    {
+    	float ratio_w = 1.0 / sc_w;
+    	float ratio_h = 1.0 / sc_h;
+    	vec2 tc = vec2(gl_FragCoord.x * ratio_w,(sc_h - gl_FragCoord.y) * ratio_h);
+    	
+    	vec3 color = vec3(0.0);
+    	color += texture(tex1,tc).rgb;
+    	color += texture(tex2,tc).rgb * 2.0;	//光が弱かったのでそれぞれ2倍して合成しています
+    	color += texture(tex3,tc).rgb * 2.0;
+    	color += texture(tex4,tc).rgb * 2.0;
+ 
+		f_color = vec4(clamp(color,0.0,1.0),1.0);
+	}
+</script>
+
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_webgl_screen  = null;
+let g_gl            = null;
+let g_prog_main     = null;
+let g_vbo_main      = {};
+let g_prog_gaus     = null;
+let g_prog_add      = null;
+let g_vbo_bloom     = {};
+let g_main          = {};		//メインシーンをレンダリングするテクスチャとフレームバッファ
+let g_bloom         = [];		//Bloom処理用のテクスチャとフレームバッファ
+let g_modelbuff    = null;		//インスタンス毎のモデル変換行列バッファ
+let g_colorbuff    = null;		//インスタンス毎の色バッファ
+let g_gaus_filter  = [];		//ガウシアンフィルタ情報
+
+let g_time   = 0;				//現在時刻[ms]
+let g_dtime  = 0;				//前回の描画からの経過時間[ms]
+
+let g_pn = new Perlin();
+
+//Processing互換定数
+const TAU = 2.0 * Math.PI;
+
+const WEIGHT_NUM     = 33;
+const CUBE_NUM       = 360;
+const ANGLE_PER_TIME = 0.02;
+const MORPH_TIME     = 5000;
+const S_MIN          = 1.0;
+const S_MAX          = 2.0;
+const D_MIN          = 5;
+const D_MAX          = 20;
+const r_MIN          = 5.0;
+const r_MAX          = 10.0;
+const a_MIN          = 0.05;
+const a_MAX          = 0.20;
+const b_MIN          = 0.01;
+const b_MAX          = 1.20;
+
+let g_start_time     = 0;
+let g_next_time      = 0;
+let g_start_S        = 0;
+let g_next_S         = 0;
+let g_start_D        = 0;
+let g_next_D         = 0;
+let g_start_r        = 0;
+let g_next_r         = 0;
+let g_start_a        = 0;
+let g_next_a         = 0;
+let g_start_b        = 0;
+let g_next_b         = 0;
+let g_c              = 0;
+let g_ns             = 0;
+let g_nr             = 0;
+
+let g_last_fps_time  = 0;
+let g_fps_count      = 0;
+let g_fps            = 60;
+let g_fps_list       = [];
+
+let g_cnt            = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//WebGL用のCanvasもスクリーンと同じサイズで用意
+	g_webgl_screen        = document.createElement("canvas");
+	g_webgl_screen.width  = g_game_width;
+	g_webgl_screen.height = g_game_height;
+	
+}
+
+function create_shader(id,type)
+{
+	//シェーダ生成
+	let shader_src = document.getElementById(id);
+	let shader     = g_gl.createShader(type);
+	
+	//生成したシェーダにソースを割り当てる
+	g_gl.shaderSource(shader,shader_src.text);
+	
+	//シェーダをコンパイルする
+	g_gl.compileShader(shader);
+	
+	//コンパイルできたかをチェック
+	if(!g_gl.getShaderParameter(shader,g_gl.COMPILE_STATUS))
+	{
+		//NGなのでログを表示
+		alert(g_gl.getShaderInfoLog(shader));
+	}
+	
+	return shader;
+}
+
+function setup_shader()
+{
+	//シェーダ類の準備
+	
+	//深度テストとカリングを有効化
+	//クリア色設定
+	g_gl.enable(g_gl.DEPTH_TEST);
+    g_gl.depthFunc(g_gl.LEQUAL);
+    g_gl.enable(g_gl.CULL_FACE);
+	g_gl.clearColor(0,0,0,1);
+	
+	//頂点シェーダとフラグメントシェーダの生成(コンパイルまでしておく)
+	let vs_main = create_shader('vshader-main',g_gl.VERTEX_SHADER);
+	let fs_main = create_shader('fshader-main',g_gl.FRAGMENT_SHADER);
+	let vs_gaus = create_shader('vshader-gaus',g_gl.VERTEX_SHADER);
+	let fs_gaus = create_shader('fshader-gaus',g_gl.FRAGMENT_SHADER);
+	let vs_add  = create_shader('vshader-add' ,g_gl.VERTEX_SHADER);
+	let fs_add  = create_shader('fshader-add' ,g_gl.FRAGMENT_SHADER);
+	
+	//プログラムオブジェクトの生成
+	g_prog_main = g_gl.createProgram();
+	g_prog_gaus = g_gl.createProgram();
+	g_prog_add  = g_gl.createProgram();
+	
+	//プログラムオブジェクトにシェーダを割り当てる
+	g_gl.attachShader(g_prog_main,vs_main);
+	g_gl.attachShader(g_prog_main,fs_main);
+	g_gl.attachShader(g_prog_gaus,vs_gaus);
+	g_gl.attachShader(g_prog_gaus,fs_gaus);
+	g_gl.attachShader(g_prog_add ,vs_add);
+	g_gl.attachShader(g_prog_add ,fs_add);
+	
+	const progs = [ g_prog_main, g_prog_gaus, g_prog_add ];
+	for(let i = 0;i < progs.length;++i)
+	{
+		//シェーダをリンク
+		g_gl.linkProgram(progs[i]);
+		
+		//リンクできたかをチェック
+		if(!g_gl.getProgramParameter(progs[i],g_gl.LINK_STATUS))
+	    {
+			//NGなのでログを表示
+			alert(g_gl.getProgramInfoLog(progs[i]));
+	    }
+	}
+
+}
+
+function setup_view_projection()
+{
+	g_gl.useProgram(g_prog_main);
+	
+	//カメラと射影行列の準備
+	const sc_w           = g_game_width;
+	const sc_h           = g_game_height;
+	const uloc_view      = g_gl.getUniformLocation(g_prog_main,'view');
+	const uloc_proj      = g_gl.getUniformLocation(g_prog_main,'proj');
+	const uloc_light_dir = g_gl.getUniformLocation(g_prog_main,'light_dir');
+	
+	//ビュー変換行列を準備
+	let vFrom    = new VectorMan3(0.0,0.0,200.0);
+	let vTo      = new VectorMan3(0.0,0.0,0.0);
+	let vUp      = new VectorMan3(0.0,1.0,0.0);
+	let mtx_view = new MatrixMan4();
+	mtx_view.view(vFrom,vTo,vUp);
+	g_gl.uniformMatrix4fv(uloc_view,false,mtx_view.m);
+
+	//射影変換行列を準備
+	let mtx_projection = new MatrixMan4();
+	mtx_projection.projectionOpenGL(10,1000,rad(60),sc_w/sc_h);
+	g_gl.uniformMatrix4fv(uloc_proj,false,mtx_projection.m);
+	
+	//光源の情報を登録
+	let light_dir = new VectorMan3(0,0,10.0);
+	light_dir.normalize();
+	g_gl.uniform3fv(uloc_light_dir,light_dir.exportSingleArray());
+	
+	//ViewPortを設定
+    g_gl.viewport(0,0,sc_w,sc_h);
+	
+}
+
+function create_cube(xscale,yscale,zscale)
+{
+	//立方体の頂点と法線リストを生成
+	const u = 0.5;
+	let vertex = 
+	[
+		-u, u, u, -u,-u, u,  u, u, u,  u, u, u, -u,-u, u,  u,-u, u,		//正面
+		 u, u,-u,  u,-u,-u, -u, u,-u, -u, u,-u,  u,-u,-u, -u,-u,-u,		//背面
+		-u, u,-u, -u,-u,-u, -u, u, u, -u, u, u, -u,-u,-u, -u,-u, u,		//左側面
+		 u, u, u,  u,-u, u,  u, u,-u,  u, u,-u,  u,-u, u,  u,-u,-u,		//右側面
+		-u, u,-u, -u, u, u,  u, u,-u,  u, u,-u, -u, u, u,  u, u, u,		//天面
+		-u,-u, u, -u,-u,-u,  u,-u, u,  u,-u, u, -u,-u,-u,  u,-u,-u		//底面
+	];
+	for(let i = 0;i < vertex.length;i+=3)
+	{
+		vertex[i+0] *= xscale;
+		vertex[i+1] *= yscale;
+		vertex[i+2] *= zscale;
+	}
+	
+	let normal = 
+	[
+		 0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,		//正面
+		 0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,  	//背面
+		-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,  	//左側面
+		 1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0, 	//右側面
+		 0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0,		//天面
+		 0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0  	//底面
+	];
+	
+	return { vertex,normal };
+}
+
+function setup_obj()
+{
+	//オブジェクトの準備
+	
+	//メインパス用の準備
+	g_gl.useProgram(g_prog_main);
+	
+	//Cubeオブジェクトの頂点と法線リストを生成
+	let obj = create_cube(1,1,1);
+	
+	const inst_num = CUBE_NUM;
+	
+	//バッファオブジェクトとデータを準備しておく
+	g_vbo_main.vtx_pos_buff    = g_gl.createBuffer();
+	g_vbo_main.vtx_pos_data    = new Float32Array(obj.vertex);
+	g_vbo_main.vtx_normal_buff = g_gl.createBuffer();
+	g_vbo_main.vtx_normal_data = new Float32Array(obj.normal);
+	g_vbo_main.obj_model_buff  = g_gl.createBuffer();
+	g_vbo_main.obj_color_buff  = g_gl.createBuffer();
+	
+	g_modelbuff = new Float32Array(16 * inst_num);
+	g_colorbuff = new Float32Array(3 * inst_num);
+	
+	
+	//Bloomパス用の準備
+	
+	//テクスチャとフレームバッファの生成
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	
+	//メインシーンをテクスチャにレンダリングさせるための
+	//フレームバッファとテクスチャを作成
+	g_main.framebuffer = g_gl.createFramebuffer();
+	g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,g_main.framebuffer);
+    
+    let depthbuffer = g_gl.createRenderbuffer();
+    g_gl.bindRenderbuffer(g_gl.RENDERBUFFER,depthbuffer);
+    g_gl.renderbufferStorage(g_gl.RENDERBUFFER,g_gl.DEPTH_COMPONENT16,sc_w,sc_h);
+    g_gl.framebufferRenderbuffer(g_gl.FRAMEBUFFER,g_gl.DEPTH_ATTACHMENT,g_gl.RENDERBUFFER,depthbuffer);
+
+	g_main.texture = g_gl.createTexture();
+    g_gl.bindTexture(g_gl.TEXTURE_2D,g_main.texture);
+    g_gl.texImage2D(g_gl.TEXTURE_2D,0,g_gl.RGBA,sc_w,sc_h,0,g_gl.RGBA,g_gl.UNSIGNED_BYTE,null);
+    g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_MIN_FILTER, g_gl.NEAREST_MIPMAP_LINEAR);
+    g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_MIN_FILTER, g_gl.LINEAR);
+    g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_WRAP_S,g_gl.CLAMP_TO_EDGE);
+    g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_WRAP_T,g_gl.CLAMP_TO_EDGE);
+    g_gl.framebufferTexture2D(g_gl.FRAMEBUFFER,g_gl.COLOR_ATTACHMENT0,g_gl.TEXTURE_2D,g_main.texture,0);
+
+    g_gl.bindTexture(g_gl.TEXTURE_2D,null);
+    g_gl.bindRenderbuffer(g_gl.RENDERBUFFER,null);
+    g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,null);
+
+	
+	//bloom_texture＆FrameBuffer
+	function create_framebuffer(scale)
+	{
+		let framebuffer_h = g_gl.createFramebuffer();
+		let framebuffer_v = g_gl.createFramebuffer();
+		let texture_h     = g_gl.createTexture();
+        let texture_v     = g_gl.createTexture();
+		
+		g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,framebuffer_h);
+		g_gl.bindTexture(g_gl.TEXTURE_2D,texture_h);
+        g_gl.texImage2D(g_gl.TEXTURE_2D,0,g_gl.RGBA,sc_w * scale,sc_h * scale,0,g_gl.RGBA,g_gl.UNSIGNED_BYTE,null);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_MAG_FILTER,g_gl.LINEAR);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_MIN_FILTER,g_gl.LINEAR);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_WRAP_S,g_gl.CLAMP_TO_EDGE);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_WRAP_T,g_gl.CLAMP_TO_EDGE);
+        g_gl.framebufferTexture2D(g_gl.FRAMEBUFFER,g_gl.COLOR_ATTACHMENT0,g_gl.TEXTURE_2D,texture_h,0);
+		
+		g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,framebuffer_v);
+		g_gl.bindTexture(g_gl.TEXTURE_2D,texture_v);
+        g_gl.texImage2D(g_gl.TEXTURE_2D,0,g_gl.RGBA,sc_w * scale,sc_h * scale,0,g_gl.RGBA,g_gl.UNSIGNED_BYTE,null);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_MAG_FILTER,g_gl.LINEAR);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_MIN_FILTER,g_gl.LINEAR);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_WRAP_S,g_gl.CLAMP_TO_EDGE);
+        g_gl.texParameteri(g_gl.TEXTURE_2D,g_gl.TEXTURE_WRAP_T,g_gl.CLAMP_TO_EDGE);
+        g_gl.framebufferTexture2D(g_gl.FRAMEBUFFER,g_gl.COLOR_ATTACHMENT0,g_gl.TEXTURE_2D,texture_v,0);
+
+        g_gl.bindTexture(g_gl.TEXTURE_2D,null);
+        g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,null);
+
+		return { framebuffer_h,texture_h,framebuffer_v,texture_v };
+	}
+	let scale = 0.5;
+	for(let i = 0;i < 3;++i)
+	{
+		g_bloom.push(create_framebuffer(scale));
+		scale /= 2.0;
+	}
+	
+	//バッファオブジェクトとデータを準備しておく
+	const pos = [ -1.0,1.0,0.0, -1.0,-1.0,0.0, 1.0, 1.0,0.0,  
+			       1.0,1.0,0.0, -1.0,-1.0,0.0, 1.0,-1.0,0.0 ];
+	g_vbo_bloom.vtx_pos_buff = g_gl.createBuffer();
+	g_vbo_bloom.vtx_pos_data = new Float32Array(pos);
+	
+	//uniformデータの準備
+	const uloc_sc_w_add = g_gl.getUniformLocation(g_prog_add,'sc_w');
+	const uloc_sc_h_add = g_gl.getUniformLocation(g_prog_add,'sc_h');
+
+	//sc_w,sc_h
+	g_gl.useProgram(g_prog_add);
+	g_gl.uniform1f(uloc_sc_w_add,sc_w);
+	g_gl.uniform1f(uloc_sc_h_add,sc_h);
+
+
+	//ガウシアンフィルタ情報生成
+	//
+	// 計算式は、下記のサイトのものを参考にしました。
+	// ありがとうございます。
+	// https://wgld.org/d/webgl/w057.html
+	//
+	const offsets = 
+	[ 
+		 5,		// 9x9	= 1+4
+		11,		//21x21 = 1+10
+		33,		//65x65 = 1+32
+	];
+	for(let i = 0;i < offsets.length;++i)
+	{
+		let weights = new Array(WEIGHT_NUM);
+		let total   = 0.0;
+		let num     = offsets[i];
+		let sigma   = 4.0;
+		weights.fill(0.0);
+		for(let g = 0;g < num;++g)
+		{
+			let r = 1.0 + 2.0 * g;
+			let w = Math.exp(-0.5 * (r * r) / (2.0 * sigma));
+			weights[g] = w;
+			if(g > 0){ w *= 2.0; }
+			total += w;
+		}
+		for(let g = 0;g < num;++g)
+		{
+			weights[g] /= total;
+		}
+		const info = { weight_num: num, weights: new Float32Array(weights) };
+		g_gaus_filter.push(info);		
+		
+		sigma *= 2.0;
+	}
+
+}
+
+function change_main_vbo()
+{
+	//メインシーンの頂点バッファに切り替え
+
+	//バッファオブジェクトを関連付ける
+	const aloc_vtx_pos    = g_gl.getAttribLocation(g_prog_main,'vtx_pos');
+	const aloc_vtx_normal = g_gl.getAttribLocation(g_prog_main,'vtx_normal');
+	const aloc_obj_model  = g_gl.getAttribLocation(g_prog_main,'obj_model');
+	const aloc_obj_color  = g_gl.getAttribLocation(g_prog_main,'obj_color');
+	const inst_num        = CUBE_NUM;
+	
+	//vtx_pos
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_pos_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_pos_data,g_gl.STATIC_DRAW);
+	g_gl.vertexAttribPointer(aloc_vtx_pos,3,g_gl.FLOAT,false,0,0);
+	g_gl.enableVertexAttribArray(aloc_vtx_pos);
+
+	//vtx_normal
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_normal_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_vbo_main.vtx_normal_data,g_gl.STATIC_DRAW);
+	g_gl.vertexAttribPointer(aloc_vtx_normal,3,g_gl.FLOAT,false,0,0);
+	g_gl.enableVertexAttribArray(aloc_vtx_normal);
+
+	//obj_model
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.obj_model_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_modelbuff,g_gl.DYNAMIC_DRAW);
+	for(let i = 0;i < 4;++i)
+	{
+		//mat4 に関連付けるには4回に分ける
+		g_gl.enableVertexAttribArray(aloc_obj_model+i);
+		g_gl.vertexAttribDivisor(aloc_obj_model+i,1);
+		g_gl.vertexAttribPointer(aloc_obj_model+i,4,g_gl.FLOAT,false,64,16*i);
+	}
+	
+	//obj_color
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.obj_color_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_colorbuff,g_gl.DYNAMIC_DRAW);
+	g_gl.enableVertexAttribArray(aloc_obj_color);
+	g_gl.vertexAttribDivisor(aloc_obj_color,1);
+	g_gl.vertexAttribPointer(aloc_obj_color,3,g_gl.FLOAT,false,12,0);
+	
+}
+
+function change_gaus_vbo()
+{
+	//ガウシアンフィルタシーンの頂点バッファに切り替え
+
+	//バッファオブジェクトを関連付ける
+	const aloc_pos = g_gl.getAttribLocation(g_prog_gaus,'vtx_pos');
+
+	//vtx_pos
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_bloom.vtx_pos_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_vbo_bloom.vtx_pos_data,g_gl.STATIC_DRAW);
+	g_gl.vertexAttribPointer(aloc_pos,3,g_gl.FLOAT,false,0,0);
+	g_gl.enableVertexAttribArray(aloc_pos);
+
+}
+
+function change_add_vbo()
+{
+	//加算合成シーンの頂点バッファに切り替え
+
+	//バッファオブジェクトを関連付ける
+	const aloc_pos = g_gl.getAttribLocation(g_prog_add,'vtx_pos');
+
+	//vtx_pos
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_bloom.vtx_pos_buff);
+	g_gl.bufferData(g_gl.ARRAY_BUFFER,g_vbo_bloom.vtx_pos_data,g_gl.STATIC_DRAW);
+	g_gl.vertexAttribPointer(aloc_pos,3,g_gl.FLOAT,false,0,0);
+	g_gl.enableVertexAttribArray(aloc_pos);
+	
+}
+
+function setup()
+{
+	//準備
+	
+	//画面調整
+	adjust_screen();
+	
+	//WebGLの準備
+	g_gl = g_webgl_screen.getContext('webgl2');
+	
+	//シェーダの準備
+	setup_shader();
+	
+	//カメラと射影行列の準備
+	setup_view_projection()
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//最初の値を決める
+	g_next_S = SL.clamp(rnd(S_MAX+1),S_MIN,S_MAX);
+	g_next_D = SL.clamp(rnd(D_MAX+1),D_MIN,D_MAX);
+	g_next_r = SL.clamp(rnd(r_MAX+1),r_MIN,r_MAX);
+	g_next_a = SL.clamp(rnd(a_MAX*100+1) / 100,a_MIN,a_MAX);
+	g_next_b = SL.clamp(rnd(b_MAX*100+1) / 100,b_MIN,b_MAX);
+	reset();
+
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_S = g_next_S;
+	g_start_D = g_next_D;
+	g_start_r = g_next_r;
+	g_start_a = g_next_a;
+	g_start_b = g_next_b;
+	
+	g_next_S = SL.clamp(rnd(S_MAX+1),S_MIN,S_MAX);
+	g_next_D = SL.clamp(rnd(D_MAX+1),D_MIN,D_MAX);
+	g_next_r = SL.clamp(rnd(r_MAX+1),r_MIN,r_MAX);
+	g_next_a = SL.clamp(rnd(a_MAX*100+1) / 100,a_MIN,a_MAX);
+	g_next_b = SL.clamp(rnd(b_MAX*100+1) / 100,b_MIN,b_MAX);
+	
+	g_c  = (rnd(10) < 3) ? 1 : 0;
+	g_ns = (rnd(10) < 3) ? 1 : 0;
+	g_nr = (rnd(10) < 3) ? 1 : 0;
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function draw()
+{
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	//メインシーンのレンダリング開始
+	const sc_w = g_game_width;
+	const sc_h = g_game_height;
+	g_gl.useProgram(g_prog_main);
+    g_gl.viewport(0,0,sc_w,sc_h);
+	g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,g_main.framebuffer);
+	//g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,null);
+	g_gl.enable(g_gl.DEPTH_TEST);
+    g_gl.depthFunc(g_gl.LEQUAL);
+    g_gl.enable(g_gl.CULL_FACE);
+	g_gl.clearColor(0,0,0,1);
+
+	//メインシーンの頂点バッファに切り替え
+	change_main_vbo();
+	
+	//毎ターンの画面クリア
+	g_gl.clear(g_gl.COLOR_BUFFER_BIT | g_gl.DEPTH_BUFFER_BIT);
+
+	//オブジェクトを動かす
+	let mtx_scale   = new MatrixMan4();
+	let mtx_nscale  = new MatrixMan4();
+	let mtx_rotateX = new MatrixMan4();
+	let mtx_rotateY = new MatrixMan4();
+	let mtx_rotateZ = new MatrixMan4();
+	let mtx_model   = new MatrixMan4();
+	let mtx_pos     = new MatrixMan4();
+	
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const e = Ease.easeInExpo(time**5);
+		
+	//オブジェクトのサイズを調整
+	const S = g_start_S + e * (g_next_S - g_start_S);
+	const D = g_start_D + e * (g_next_D - g_start_D);
+	mtx_scale.scale(S,S,S);
+	
+	//回転行列作成
+	const angle = g_time * ANGLE_PER_TIME;
+	mtx_rotateX.rotateX(rad(angle));
+	mtx_rotateY.rotateY(rad(angle));
+	mtx_rotateZ.rotateZ(rad(angle*3));
+	
+	//たくさんCubeを並べる
+	const r     = g_start_r + e * (g_next_r - g_start_r);
+	const add_a = g_start_a + e * (g_next_a - g_start_a);
+	const add_b = g_start_b + e * (g_next_b - g_start_b);
+	let   c     = angle;
+	let   a     = 0;
+	let   b     = 0;
+	let idx     = 0;
+	for(let i = 0;i < CUBE_NUM;++i)
+	{
+		//モデル変換行列の初期化
+		mtx_model.initialize();
+		
+		//ノイズによる乱れを付加
+		const rr = (g_nr == 0) ? r   : (r * (1.0 - (g_pn.perlin(a,b,0) - 0.5) / 2));
+		const ns = (g_ns == 0) ? 1.0 : (1.0 + (g_pn.perlin(a,b,0) - 0.5) * 10.0);
+		mtx_nscale.scale(ns,ns,ns);
+		
+		//移動行列作成
+		const x = rr * Math.cos(a) * Math.sin(b);
+		const y = rr * Math.sin(a) * Math.sin(b);
+		const z = rr * Math.cos(b);
+		
+		mtx_pos.translate(x*D,y*D,z*D);
+		a += add_a;
+		b  = (b + add_b) % Math.PI;
+		
+		//拡大と移動と回転
+		mtx_model.mul(mtx_scale);
+		mtx_model.mul(mtx_nscale);
+		mtx_model.mul(mtx_pos);
+		mtx_model.mul(mtx_rotateX);
+		mtx_model.mul(mtx_rotateZ);
+		
+		//モデル変換行列のバッファに格納
+		const mtx_num   = mtx_model.m.length;
+		const model_pos = mtx_num * idx;
+		for(let m = 0;m < mtx_num;++m)
+		{
+			g_modelbuff[model_pos+m] = mtx_model.m[m];
+		}
+		
+		//色を決める
+		c = (g_c == 0)? c : ((a + b) / TAU * 360);
+		let col = hsl2rgb(Math.floor(c),0.9,0.55);
+		
+		//モデル色のバッファに格納
+		const col_pos = 3 * idx;
+		g_colorbuff[col_pos+0] = col.r;
+		g_colorbuff[col_pos+1] = col.g;
+		g_colorbuff[col_pos+2] = col.b;
+		
+		idx++;
+	}
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.obj_model_buff);
+	g_gl.bufferSubData(g_gl.ARRAY_BUFFER,0,g_modelbuff);
+	g_gl.bindBuffer(g_gl.ARRAY_BUFFER,g_vbo_main.obj_color_buff);
+	g_gl.bufferSubData(g_gl.ARRAY_BUFFER,0,g_colorbuff);
+	
+	//インスタンスを描画
+	g_gl.drawArraysInstanced(g_gl.TRIANGLES,0,36,CUBE_NUM);
+
+
+	//メインシーンをレンダリングしたテクスチャのミップマップを作る
+    g_gl.bindTexture(g_gl.TEXTURE_2D,g_main.texture);
+	g_gl.generateMipmap(g_gl.TEXTURE_2D);
+	g_gl.bindTexture(g_gl.TEXTURE_2D,null);
+
+    
+    //ガウシアンフィルタシーンのレンダリング開始
+    
+    //深度テストとカリングをOFFにする
+	g_gl.disable(g_gl.DEPTH_TEST);
+    g_gl.disable(g_gl.CULL_FACE);
+	
+	//ガウシアンフィルタシーンの頂点バッファに切り替え
+	change_gaus_vbo();
+	
+	//縦方向／横方向の2パスでガウスぼかしを掛ける
+	const uloc_sc_w_gaus   = g_gl.getUniformLocation(g_prog_gaus,'sc_w');
+	const uloc_sc_h_gaus   = g_gl.getUniformLocation(g_prog_gaus,'sc_h');
+	const uloc_tex         = g_gl.getUniformLocation(g_prog_gaus,'tex');
+	const uloc_weight_num  = g_gl.getUniformLocation(g_prog_gaus,'weight_num');
+	const uloc_weights     = g_gl.getUniformLocation(g_prog_gaus,'weights');
+	const uloc_is_vertical = g_gl.getUniformLocation(g_prog_gaus,'is_vertical');
+	const vertex_num       = 6;
+	let scale = 0.5;
+	for(let i = 0;i < g_bloom.length;++i)
+	{
+		g_gl.useProgram(g_prog_gaus);
+		g_gl.viewport(0,0,sc_w * scale,sc_h * scale);
+		
+		//sc_w,sc_h
+		g_gl.uniform1f(uloc_sc_w_gaus,sc_w * scale);
+		g_gl.uniform1f(uloc_sc_h_gaus,sc_h * scale);
+	
+		//横方向ぼかし)
+		g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,g_bloom[i].framebuffer_h);
+
+		g_gl.activeTexture(g_gl.TEXTURE0);
+		g_gl.bindTexture(g_gl.TEXTURE_2D,g_main.texture);
+
+		g_gl.clearColor(0.0,0.0,0.0,1.0);
+		g_gl.clear(g_gl.COLOR_BUFFER_BIT);
+
+		g_gl.uniform1i(uloc_tex,0);
+		g_gl.uniform1i(uloc_weight_num,g_gaus_filter[i].weight_num);
+		g_gl.uniform1fv(uloc_weights,g_gaus_filter[i].weights);
+		g_gl.uniform1i(uloc_is_vertical,false);
+		
+		g_gl.drawArrays(g_gl.TRIANGLES,0,vertex_num);
+
+
+		//縦方向ぼかし
+		g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,g_bloom[i].framebuffer_v);
+
+		g_gl.activeTexture(g_gl.TEXTURE0);
+		g_gl.bindTexture(g_gl.TEXTURE_2D,g_bloom[i].texture_h);
+
+		g_gl.clearColor(0.0,0.0,0.0,1.0);
+		g_gl.clear(g_gl.COLOR_BUFFER_BIT);
+
+		g_gl.uniform1i(uloc_tex,0);
+		g_gl.uniform1i(uloc_weight_num,g_gaus_filter[i].weight_num);
+		g_gl.uniform1fv(uloc_weights,g_gaus_filter[i].weights);
+		g_gl.uniform1i(uloc_is_vertical,true);
+		
+		g_gl.drawArrays(g_gl.TRIANGLES,0,vertex_num);
+
+		scale /= 2.0;
+	}
+
+	
+	//加算合成シーンのレンダリング開始
+    g_gl.useProgram(g_prog_add);
+    
+	//加算合成シーンの頂点バッファに切り替え
+	change_add_vbo();
+	
+	const uloc_tex1 = g_gl.getUniformLocation(g_prog_add,'tex1');
+	const uloc_tex2 = g_gl.getUniformLocation(g_prog_add,'tex2');
+	const uloc_tex3 = g_gl.getUniformLocation(g_prog_add,'tex3');
+	const uloc_tex4 = g_gl.getUniformLocation(g_prog_add,'tex4');
+	
+	g_gl.viewport(0,0,sc_w,sc_h);
+	g_gl.bindFramebuffer(g_gl.FRAMEBUFFER,null);
+
+	g_gl.clearColor(0.0,0.0,0.0,1.0);
+	g_gl.clear(g_gl.COLOR_BUFFER_BIT);
+
+	g_gl.activeTexture(g_gl.TEXTURE0);
+	g_gl.bindTexture(g_gl.TEXTURE_2D,g_main.texture);
+	g_gl.uniform1i(uloc_tex1,0);
+	g_gl.activeTexture(g_gl.TEXTURE1);
+	g_gl.bindTexture(g_gl.TEXTURE_2D,g_bloom[0].texture_v);
+	g_gl.uniform1i(uloc_tex2,1);
+	g_gl.activeTexture(g_gl.TEXTURE2);
+	g_gl.bindTexture(g_gl.TEXTURE_2D,g_bloom[1].texture_v);
+	g_gl.uniform1i(uloc_tex3,2);
+	g_gl.activeTexture(g_gl.TEXTURE3);
+	g_gl.bindTexture(g_gl.TEXTURE_2D,g_bloom[2].texture_v);
+	g_gl.uniform1i(uloc_tex4,3);
+	
+	g_gl.drawArrays(g_gl.TRIANGLES,0,vertex_num);
+	
+	g_gl.flush();
+	
+	
+	//WebGL用のcanvasから表示用の2Dcanvasに転送
+	const screen = document.getElementById("game-screen");
+	const ctx    = screen.getContext("2d");
+	ctx.drawImage(g_webgl_screen,0,0);
+	
+	//変形終了時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
