@@ -76,7 +76,7 @@ creative_coding/
  - 033.`julia`：[パパのジュリア集合](https://voich2014.github.io/creative_coding/src/julia/index2.html)
  - 034.`lenti`：[パパのレンチキュラー](https://voich2014.github.io/creative_coding/src/lenti/index2.html)
  - 035.`csph`：[パパの間違った球体](https://voich2014.github.io/creative_coding/src/csph/index1.html)
-
+ - 036.`boo`：[パパのミニチュアぶーぶー](https://voich2014.github.io/creative_coding/src/boo/index1.html)
 
 ---
 
