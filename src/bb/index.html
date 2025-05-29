@@ -1,0 +1,863 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの脳がバグるやつ</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、JavaScriptでWebGLも使わずに、自力3D計算でオブジェクトを
+	表示しようという試みです。
+	
+	今回は、時折TwitterのTLで見かける脳がバグる図形を再現してみたいと思います。
+	
+	具体的な数式は、tomoqさん(@TOMOQ8192)のツイートを参考にしています。	
+	https://twitter.com/TOMOQ8192/status/1286675540674396161?s=20
+	
+	これ、ほんと脳がバグりますよね(*´ω｀*)
+	tomoqさんに圧倒的感謝を！
+	
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: black;
+		color: #fff;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:0px;
+		z-index: 100;
+	}
+	
+	#algo
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:16px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+	
+	.texture
+	{
+		display: none;
+	}
+-->
+</style>
+
+<!-- 自前ライブラリ群 -->
+<script type="text/javascript">
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function max(a,b)
+{
+	//大きい方を返す
+	return Math.max(a,b);
+}
+
+function min(a,b)
+{
+	//小さい方を返す
+	return Math.min(a,b);
+}
+
+function lerpColor(col1,col2,x)
+{
+	let c = 
+	{
+		r: col1.r + x * (col2.r -col1.r),
+		g: col1.g + x * (col2.g -col1.g),
+		b: col1.b + x * (col2.b -col1.b),
+	};
+	return c;
+}
+
+function hsl2rgb(h,s,l)
+{
+	//HSLからRGBに変換
+	//
+	//  h(hue)       : 色相  0-359の値[度]
+	//  s(saturation): 彩度  0-1.0の値[%]
+	//  l(lightness) : 明度  0-1.0の値[%]
+	//
+	let max,min;
+	let r,g,b;
+	
+	//念のためHを補正
+	h = h % 360;
+
+	if(l < 0.5)
+	{
+		max = 255 * (l + l * (s / 1.0));
+		min  = 255 * (l - l * (s / 1.0));
+	}
+	else
+	{
+		max = 255 * (l + (1.0 - l) * (s / 1.0));
+		min = 255 * (l - (1.0 - l) * (s / 1.0)); 
+	}
+	 
+	if(h < 60)
+	{
+		r = max;
+		g = min + (max - min) * (h / 60);
+		b = min;
+	}
+	else if((h >= 60) && (h < 120))
+	{
+		r = min + (max - min) * ((120 - h) / 60);
+		g = max;
+		b = min;
+	 }
+	 else if((h >= 120) && (h < 180))
+	 {
+		r = min;
+		g = max;
+		b = min + (max - min) * ((h - 120) / 60);        
+	}
+	else if((h >= 180) && (h < 240))
+	{
+		r = min;
+		g = min + (max - min) * ((240 - h) / 60);
+		b = max;
+	}
+	else if((h >= 240) && (h < 300))
+	{
+		r = min + (max - min) * ((h - 240) / 60);
+		g = min;
+		b = max;
+	}
+	else if((h >= 300) && (h < 360))
+	{
+		r = max;
+		g = min;
+		b = min + (max - min) * ((360 - h) / 60); 
+	}
+
+	r =  Math.round(r);
+	g =  Math.round(g);
+	b =  Math.round(b);
+	
+	return { r:r/255, g: g/255, b: b/255 };
+}
+
+//パーリンノイズクラス
+//https://gist.github.com/Flafla2/f0260a861be0ebdeef76
+//↑のC#のソースを参考に雑に移植しています。
+//ご利用は自己責任でお願いします。
+class Perlin
+{
+	//コンストラクタ
+	constructor(repeat = -1)
+	{
+		//メンバの初期化
+		this.repeat = repeat;
+		
+		const permutation =
+		[
+			151,160,137,91,90,15,															// Hash lookup table as defined by Ken Perlin.  This is a randomly
+			131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,	// arranged array of all numbers from 0-255 inclusive.
+			190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
+			88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
+			77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
+			102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
+			135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
+			5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
+			223,183,170,213,119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,9,
+			129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,104,218,246,97,228,
+			251,34,242,193,238,210,144,12,191,179,162,241, 81,51,145,235,249,14,239,107,
+			49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
+			138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
+		];
+		
+		this.p = new Int32Array(512);
+		for(let x = 0;x < 512;x++)
+		{
+			this.p[x] = permutation[x%256];
+		}
+	}
+	
+	inc(num)
+	{
+		num++;
+		if(this.repeat > 0){ num %= this.repeat; }
+		return num;
+	}
+	
+	grad(hash,x,y,z)
+	{
+		 switch(hash & 0xF)
+	    {
+	        case 0x0: return  x + y;
+	        case 0x1: return -x + y;
+	        case 0x2: return  x - y;
+	        case 0x3: return -x - y;
+	        case 0x4: return  x + z;
+	        case 0x5: return -x + z;
+	        case 0x6: return  x - z;
+	        case 0x7: return -x - z;
+	        case 0x8: return  y + z;
+	        case 0x9: return -y + z;
+	        case 0xA: return  y - z;
+	        case 0xB: return -y - z;
+	        case 0xC: return  y + x;
+	        case 0xD: return -y + z;
+	        case 0xE: return  y - x;
+	        case 0xF: return -y - z;
+	        default: return 0; // never happens
+	    }
+	}
+	
+	fade(t)
+	{
+		// Fade function as defined by Ken Perlin.  This eases coordinate values
+		// so that they will "ease" towards integral values.  This ends up smoothing
+		// the final output.
+		return t * t * t * (t * (t * 6 - 15) + 10);		// 6t^5 - 15t^4 + 10t^3
+	}
+	
+	lerp(a,b,x)
+	{
+		return a + x * (b - a);
+	}
+	
+	//パーリンノイズ取得(0.0～1.0の値が返ります)
+	perlin(x,y,z)
+	{
+		if(this.repeat > 0)
+		{
+			// If we have any repeat on, 
+			// change the coordinates to their "local" repetitions
+			x = x % this.repeat;
+			y = y % this.repeat;
+			z = z % this.repeat;
+		}
+		
+		const xi = Math.floor(x) & 255;		// Calculate the "unit cube" that the point asked will be located in
+		const yi = Math.floor(y) & 255;		// The left bound is ( |_x_|,|_y_|,|_z_| ) and the right bound is that
+		const zi = Math.floor(z) & 255;		// plus 1.  Next we calculate the location (from 0.0 to 1.0) in that cube.
+		const xf = x - Math.floor(x);		// We also fade the location to smooth the result.
+		const yf = y - Math.floor(y);
+		const zf = z - Math.floor(z);
+		const  u = this.fade(xf);
+		const  v = this.fade(yf);
+		const  w = this.fade(zf);
+															
+		const aaa = this.p[this.p[this.p[         xi ]+         yi ]+         zi ];
+		const aba = this.p[this.p[this.p[         xi ]+this.inc(yi)]+         zi ];
+		const aab = this.p[this.p[this.p[         xi ]+         yi ]+this.inc(zi)];
+		const abb = this.p[this.p[this.p[         xi ]+this.inc(yi)]+this.inc(zi)];
+		const baa = this.p[this.p[this.p[this.inc(xi)]+         yi ]+         zi ];
+		const bba = this.p[this.p[this.p[this.inc(xi)]+this.inc(yi)]+         zi ];
+		const bab = this.p[this.p[this.p[this.inc(xi)]+         yi ]+this.inc(zi)];
+		const bbb = this.p[this.p[this.p[this.inc(xi)]+this.inc(yi)]+this.inc(zi)];
+	
+		let x1 = this.lerp(this.grad(aaa, xf  , yf  , zf),	// The gradient function calculates the dot product between a pseudorandom
+						   this.grad(baa, xf-1, yf  , zf),	// gradient vector and the vector from the input coordinate to the 8
+						   u);								// surrounding points in its unit cube.
+		let x2 = this.lerp(this.grad(aba, xf  , yf-1, zf),	// This is all then lerped together as a sort of weighted average based on the faded (u,v,w)
+						   this.grad(bba, xf-1, yf-1, zf),	// values we made earlier.
+						   u);
+		let y1 = this.lerp(x1, x2, v);
+
+		x1 = this.lerp(this.grad(aab, xf  , yf  , zf-1),
+					   this.grad(bab, xf-1, yf  , zf-1),
+					   u);
+		x2 = this.lerp(this.grad(abb, xf  , yf-1, zf-1),
+		          	   this.grad(bbb, xf-1, yf-1, zf-1),
+		          	   u);
+		let y2 = this.lerp(x1, x2, v);
+		
+		return (this.lerp(y1, y2, w)+1)/2;	// For convenience we bound it to 0 - 1 (theoretical min/max before is -1 - 1)
+	}
+	
+	octavePerlin(x,y,z,octaves,persistence)
+	{
+		let total     = 0;
+		let frequency = 1;
+		let amplitude = 1;
+		let maxValue  = 0;	// Used for normalizing result to 0.0 - 1.0
+		for(let i=0;i<octaves;i++)
+		{
+			total += this.perlin(x * frequency, y * frequency, z * frequency) * amplitude;
+			
+			maxValue += amplitude;
+			
+			amplitude *= persistence;
+			frequency *= 2;
+		}
+		
+		return total/maxValue;
+	}
+	
+}
+
+//イージング関数クラス
+//https://easings.net/ja#
+//↑のソースを参考に雑に移植しています。
+//ご利用は自己責任でお願いします。
+class Ease
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static easeInSine(x)
+	{
+		return 1 - Math.cos((x * Math.PI) / 2);
+	}
+
+	static easeOutSine(x)
+	{
+		return Math.sin((x * Math.PI) / 2);
+	}
+
+	static easeInOutSine(x)
+	{
+		return -(Math.cos(Math.PI * x) - 1) / 2;
+	}
+	
+	static easeInQuad(x)
+	{
+		return x * x;
+	}
+
+	static easeOutQuad(x)
+	{
+		return 1 - (1 - x) * (1 - x);
+	}
+
+	static easeInOutQuad(x)
+	{
+		return (x < 0.5) ? (2 * x * x) : (1 - Math.pow(-2 * x + 2, 2) / 2);
+	}
+
+	static easeInCubic(x)
+	{
+		return x * x * x;
+	}
+
+	static easeOutCubic(x)
+	{
+		return 1 - Math.pow(1 - x, 3);
+	}
+
+	static easeInOutCubic(x)
+	{
+		return (x < 0.5) ? (4 * x * x * x) : (1 - Math.pow(-2 * x + 2, 3) / 2);
+	}
+
+	static easeInQuart(x)
+	{
+		return x * x * x * x;
+	}
+
+	static easeOutQuart(x)
+	{
+		return 1 - Math.pow(1 - x, 4);
+	}
+
+	static easeInOutQuart(x)
+	{
+		return (x < 0.5) ? (8 * x * x * x * x) : (1 - Math.pow(-2 * x + 2, 4) / 2);
+	}
+
+	static easeInQuint(x)
+	{
+		return x * x * x * x * x;
+	}
+
+	static easeOutQuint(x)
+	{
+		return 1 - Math.pow(1 - x, 5);
+	}
+
+	static easeInOutQuint(x)
+	{
+		return (x < 0.5) ? (16 * x * x * x * x * x) : (1 - Math.pow(-2 * x + 2, 5) / 2);
+	}
+
+	static easeInExpo(x)
+	{
+		return (x === 0) ? 0 : Math.pow(2, 10 * x - 10);
+	}
+
+	static easeOutExpo(x)
+	{
+		return (x === 1) ? 1 : (1 - Math.pow(2, -10 * x));
+	}
+
+	static easeInOutExpo(x)
+	{
+		return (x === 0)
+  			    ? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : ((x < 0.5)
+  				        ? (Math.pow(2, 20 * x - 10) / 2)
+  				        : ((2 - Math.pow(2, -20 * x + 10)) / 2)
+  				      )
+  				  );
+	}
+
+	static easeInCirc(x)
+	{
+		return 1 - Math.sqrt(1 - Math.pow(x, 2));
+	}
+
+	static easeOutCirc(x)
+	{
+		return Math.sqrt(1 - Math.pow(x - 1, 2));
+	}
+
+	static easeInOutCirc(x)
+	{
+		return (x < 0.5)
+  				? ((1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2)
+  				: ((Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2);
+	}
+
+	static easeInBack(x)
+	{
+		const c1 = 1.70158;
+		const c3 = c1 + 1;
+
+		return c3 * x * x * x - c1 * x * x;
+	}
+
+	static easeOutBack(x)
+	{
+		const c1 = 1.70158;
+		const c3 = c1 + 1;
+
+		return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+	}
+
+	static easeInOutBack(x)
+	{
+		const c1 = 1.70158;
+		const c2 = c1 * 1.525;
+
+		return (x < 0.5)
+  				? ((Math.pow(2 * x, 2) * ((c2 + 1) * 2 * x - c2)) / 2)
+  				: ((Math.pow(2 * x - 2, 2) * ((c2 + 1) * (x * 2 - 2) + c2) + 2) / 2);
+	}
+
+	static easeInElastic(x)
+	{
+		const c4 = (2 * Math.PI) / 3;
+
+		return (x === 0)
+  				? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : (-Math.pow(2, 10 * x - 10) * Math.sin((x * 10 - 10.75) * c4))
+  				  );
+	}
+
+	static easeOutElastic(x)
+	{
+		const c4 = (2 * Math.PI) / 3;
+
+		return (x === 0)
+  				? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : (Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * c4) + 1)
+  				  );
+	}
+
+	static easeInOutElastic(x)
+	{
+		const c5 = (2 * Math.PI) / 4.5;
+
+		return (x === 0)
+  				? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : ((x < 0.5)
+  				 	    ? (-(Math.pow(2, 20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2)
+  					    : ((Math.pow(2, -20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1)
+  					  )
+  				  );
+	}
+
+	static easeInBounce(x)
+	{
+		return 1 - Ease.easeOutBounce(1 - x);
+	}
+
+	static easeOutBounce(x)
+	{
+		const n1 = 7.5625;
+		const d1 = 2.75;
+
+		if (x < 1 / d1) {
+		    return n1 * x * x;
+		} else if (x < 2 / d1) {
+		    return n1 * (x -= 1.5 / d1) * x + 0.75;
+		} else if (x < 2.5 / d1) {
+		    return n1 * (x -= 2.25 / d1) * x + 0.9375;
+		} else {
+		    return n1 * (x -= 2.625 / d1) * x + 0.984375;
+		}
+	}
+
+	static easeInOutBounce(x)
+	{
+		return (x < 0.5)
+  				? ((1 - Ease.easeOutBounce(1 - 2 * x)) / 2)
+  				: ((1 + Ease.easeOutBounce(2 * x - 1)) / 2);
+	}
+	
+}
+
+
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_offsc;							//自力描画用オフスクリーン
+let g_draw_algo;						//選択中の描画アルゴリズムインデックス
+let g_renderingman;						//レンダリング担当
+
+let g_pn     = new Perlin();			//パーリンノイズ生成用
+let g_time   = 0;						//現在時刻[ms]
+let g_dtime  = 0;						//前回の描画からの経過時間[ms]
+
+const BOARD_WIDTH   = 320;
+const BOARD_HEIGHT  = 440;
+const MORPH_TIME    = 3000;
+const div_MIN       = 7;
+const div_MAX       = 150;
+let g_screen_ctx    = null;
+let g_board_cv      = null;
+let g_board_ctx     = null;
+let g_board_offsc   = null;
+let g_board_left    = 0;
+let g_board_top     = 0;
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_start_div     = 0;
+let g_next_div      = 0;
+let g_start_ox      = 0;
+let g_next_ox       = 0;
+let g_start_oy      = 0;
+let g_ease          = null;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width) / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+	
+	//図形描画用キャンバスとImageDataを準備
+	g_board_cv  = document.createElement("canvas");
+	g_board_ctx = g_board_cv.getContext("2d");
+	
+	g_board_cv.width  = BOARD_WIDTH;
+	g_board_cv.height = BOARD_HEIGHT;
+	g_board_cv.style.display = "none";
+			
+	g_board_offsc = g_board_ctx.createImageData(BOARD_WIDTH,BOARD_HEIGHT);
+	g_board_offsc.data.fill(255);	//不透明白で初期化
+
+	//メイン画面の中央に配置
+	g_board_left = (g_game_width  - BOARD_WIDTH ) / 2;
+	g_board_top  = (g_game_height - BOARD_HEIGHT) / 2;
+	
+	//メイン画面のContextを取得しておく
+	const screen = document.getElementById("game-screen");
+	g_screen_ctx = screen.getContext("2d");
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+	
+	//最初の値を決める
+	g_next_div = div_MIN + rnd(div_MAX);
+	g_next_ox  = 0;
+	g_next_oy  = 0;
+	reset();
+
+}
+
+function reset()
+{
+
+	//次の目標値を決める
+	
+	g_start_div = g_next_div;
+	g_start_ox  = g_next_ox;
+	g_start_oy  = g_next_oy;
+	
+	g_next_div  = div_MIN + rnd(div_MAX);
+	g_next_ox   = (rnd(10) < 4) ? rnd(BOARD_WIDTH ) : 0;
+	g_next_oy   = (rnd(10) < 4) ? rnd(BOARD_HEIGHT) : 0;
+	
+	const eases =
+	[
+		Ease.easeInSine,    Ease.easeOutSine,    Ease.easeInOutSine,
+		Ease.easeInQuad,    Ease.easeOutQuad,    Ease.easeInOutQuad,
+		Ease.easeInCubic,   Ease.easeOutCubic,   Ease.easeInOutCubic,
+		Ease.easeInQuart,   Ease.easeOutQuart,   Ease.easeInOutQuart,
+		Ease.easeInQuint,   Ease.easeOutQuint,   Ease.easeInOutQuint,
+		Ease.easeInExpo,    Ease.easeOutExpo,    Ease.easeInOutExpo,
+		Ease.easeInCirc,    Ease.easeOutCirc,    Ease.easeInOutCirc,
+		Ease.easeInBack,    Ease.easeOutBack,    Ease.easeInOutBack,
+		Ease.easeInElastic, Ease.easeOutElastic, Ease.easeInOutElastic,
+		Ease.easeInBounce,  Ease.easeOutBounce,  Ease.easeInOutBounce
+	];
+	g_ease = eases[rnd(eases.length)];
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;// + " y="+g_y+" z="+g_z+" r="+g_r;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+
+	//経過時間計算
+	const  t = (g_time % MORPH_TIME) / MORPH_TIME;
+	let time = (g_time - g_start_time) / MORPH_TIME;
+	if(time > 1.0){ time = 1.0; }
+	const ease = g_ease(time);
+	
+	//図形キャンバスの全ピクセルについて判定して色付け
+	const sin_2pt = Math.sin(2 * Math.PI * t);
+	const sin_pt  = Math.sin(Math.PI * t);
+	const cos_pt  = Math.cos(Math.PI * t);
+	const div     = g_start_div + ease * (g_next_div - g_start_div);
+	const ox      = g_start_ox + ease * (g_next_ox - g_start_ox);
+	const oy      = g_start_oy + ease * (g_next_oy - g_start_oy);
+	let   data    = g_board_offsc.data;
+	for(let y = 0;y < BOARD_HEIGHT;++y)
+	{
+		const y_pos = BOARD_WIDTH * y * 4;
+		for(let x = 0;x < BOARD_WIDTH;++x)
+		{
+			//色付判定計算
+			//
+			// 参考　tomoqさん(@TOMOQ8192)紹介のページ
+			// https://www.desmos.com/calculator/te92ujqtdr
+			//
+			const xx = (x - BOARD_WIDTH  / 2 + ox) / div;
+			const yy = (y - BOARD_HEIGHT / 2 + oy) / div;
+			const xd = (xx - 2 * Math.floor((xx + Math.ceil(sin_2pt / 2)) / 2) - 1 + Math.ceil(sin_2pt / 2));
+			const yd = (yy - 2 * Math.floor((yy + Math.ceil(sin_2pt / 2)) / 2) - 1 + Math.ceil(sin_2pt / 2));
+			const a  = (2 * Math.ceil(sin_2pt / 2) - 1);
+			const b  =  xd * cos_pt;
+			const c  =  yd * sin_pt;
+			const d  = -xd * sin_pt;
+			const e  =  yd * cos_pt;
+			const r  =  a * (Math.abs(b + c) + Math.abs(d + e) - 1);
+			
+			const cols =
+			[
+				{ r: 255, g: 255, b: 255 },
+				{ r:   0, g: 128, b:  26 }
+			];
+			
+			//色を打つ
+			const col = (r <= 0) ? cols[1] : cols[0];
+			const pos = y_pos + x * 4;
+			data[pos + 0] = col.r;
+			data[pos + 1] = col.g;
+			data[pos + 2] = col.b;
+		}
+	}
+	
+	//図形描画用キャンバスを更新して転送
+	g_board_ctx.putImageData(g_board_offsc,0,0);
+	g_screen_ctx.drawImage(g_board_cv,g_board_left,g_board_top);
+	
+	//変形終了時刻チェック
+	if(g_time >= g_next_time)
+	{
+		//次の区切り時刻を決めてリセット
+		g_start_time = g_time;
+		g_next_time  = g_start_time + MORPH_TIME;
+		reset();
+	}
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
