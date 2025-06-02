@@ -80,6 +80,7 @@ creative_coding/
  - 037.`bb`：[パパの脳がバグるやつ](https://voich2014.github.io/creative_coding/src/bb/index1.html)
  - 038.`imp`：[パパの不可能図形](https://voich2014.github.io/creative_coding/src/imp/index1.html)
  - 039.`md`：[パパの数学デッサン](https://voich2014.github.io/creative_coding/src/md/index3.html)
+ - 040.`earth`：[パパの球体テクスチャ](https://voich2014.github.io/creative_coding/src/earth/index1.html)
 
 ---
 

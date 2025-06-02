@@ -1,0 +1,14 @@
+テクスチャ
+https://www.solarsystemscope.com/textures/
+
+https://ara-web.net/blog/three-js/post-2287/
+
+天体の大きさ比較
+https://ja.wikipedia.org/wiki/%E5%A4%A7%E3%81%8D%E3%81%95%E9%A0%86%E3%81%AE%E5%A4%AA%E9%99%BD%E7%B3%BB%E5%A4%A9%E4%BD%93%E3%81%AE%E4%B8%80%E8%A6%A7
+
+     平均半径[km]  月基準のスケール
+木星　69911        40.2458119854931
+　
+地球　6371.0        3.66760693109205
+　　
+月　　1737.1        1.0
