@@ -81,6 +81,7 @@ creative_coding/
  - 038.`imp`：[パパの不可能図形](https://voich2014.github.io/creative_coding/src/imp/index1.html)
  - 039.`md`：[パパの数学デッサン](https://voich2014.github.io/creative_coding/src/md/index3.html)
  - 040.`earth`：[パパの球体テクスチャ](https://voich2014.github.io/creative_coding/src/earth/index1.html)
+ - 041.`maze`：[パパのちっちゃい迷路](https://voich2014.github.io/creative_coding/src/maze/index1.html)
 
 ---
 

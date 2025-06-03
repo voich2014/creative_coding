@@ -1,0 +1,34 @@
+
+neko800(@nekohachi1)さんの迷路
+https://twitter.com/nekohachi1/status/1277315976866889731?s=20
+https://twitter.com/nekohachi1/status/1277316446331080705?s=20
+
+テクスチャはCanvasに読まないといけない？ getImageDataをどうするか。
+imgタグから取れるのだろうか？
+
+UV座標は、頂点インデックスリストと同じ個数になるように、UV座標
+配列を3Dオブジェクトクラス側で作って、polyTexCordListって感じで
+取り出そうかな。
+
+・imgタグにDATAURIで画像を埋め込んでおく。
+・setTextureメソッドをレンダラに作って、任意のidとimg要素を渡して
+　中で、createCanvasElementしてdrawImageした後、オフスクリーンと
+　してImageDataを保持する。
+
+
+
+img要素の元画像サイズを取得するには、
+var width = element.naturalWidth ;
+var height = element.naturalHeight ;
+
+
+フリー素材
+https://www.beiz.jp/
+https://www.beiz.jp/%E7%B4%A0%E6%9D%90/%E3%83%AC%E3%83%B3%E3%82%AC/
+
+ドット絵変換
+http://dot-e-nanika.com/
+https://app.monopro.org/pixel/
+
+
+
