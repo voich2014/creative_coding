@@ -1,0 +1,4157 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパの無限ドミノ4</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、JavaScriptでWebGLも使わずに、自力3D計算でオブジェクトを
+	表示しようという試みです。
+	
+	今回は、ヤスハラユウジ(@dsedb)さんの作品を大元にして、
+	https://twitter.com/dsedb/status/1231579794178887680?s=20
+	
+	凸撃兵(@Stosstruppe)さんの発展作品を真似っ子させて頂きました。
+	https://twitter.com/Stosstruppe/status/1272688355323416577?s=20
+	
+	オリジナル作者のヤスハラユウジさんと凸撃兵さんに圧倒的感謝を！
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: black;
+		color: #fff;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:0px;
+		z-index: 100;
+	}
+	
+	#algo
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:16px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+-->
+</style>
+
+<!-- 自前ライブラリ群 -->
+<script type="text/javascript">
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function max(a,b)
+{
+	//大きい方を返す
+	return Math.max(a,b);
+}
+
+function min(a,b)
+{
+	//小さい方を返す
+	return Math.min(a,b);
+}
+
+//3次元ベクトル管理人
+class VectorMan3
+{
+	//コンストラクタ
+	constructor(x = 0,y = 0,z = 0)
+	{
+		//プロパティの初期化
+		this.setValue(x,y,z);
+	}
+	
+	//値の一括セット
+	setValue(x,y,z)
+	{
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
+	
+	//コピー
+	copy(v3)
+	{
+		this.x = v3.x;
+		this.y = v3.y;
+		this.z = v3.z;
+	}
+	
+	//単位ベクトルに変換
+	normalize()
+	{
+		//単位ベクトルとは、長さが1のベクトルのこと
+		//なので、各値を長さで割ってベクトルの長さが1
+		//になるようにする
+		const x   = this.x;
+		const y   = this.y;
+		const z   = this.z;
+		let len   = Math.sqrt(x*x + y*y + z*z);
+		
+		if(len != 0)
+		{
+			len = 1.0 / len;
+			this.x *= len;
+			this.y *= len;
+			this.z *= len;
+		}
+	}
+	
+	//内積を計算
+	dotProduct(v)
+	{
+		//内積を取るとベクトルとベクトルのなす角度が求まる
+		
+		return (this.x * v.x + this.y * v.y + this.z * v.z);
+	}
+
+	//外積を計算し、格納
+	crossProduct(v1,v2)
+	{
+		//外積は主に面に垂直な法線ベクトルを求めるために使用する
+
+		this.x = v1.y * v2.z - v1.z * v2.y;
+		this.y = v1.z * v2.x - v1.x * v2.z;
+		this.z = v1.x * v2.y - v1.y * v2.x;
+	}
+
+	//ベクトルを反転する
+	invert()
+	{
+		this.x = -this.x;
+		this.y = -this.y;
+		this.z = -this.z;
+	}
+
+	//ベクトル同士の四則演算
+	add(v3)
+	{
+		this.x += v3.x;
+		this.y += v3.y;
+		this.z += v3.z;
+	
+		return this;
+	}
+	
+	sub(v3)
+	{
+		this.x -= v3.x;
+		this.y -= v3.y;
+		this.z -= v3.z;
+	
+		return this;
+	}
+	
+	mul(v3)
+	{
+		this.x *= v3.x;
+		this.y *= v3.y;
+		this.z *= v3.z;
+	
+		return this;
+	}
+	
+	div(v3)
+	{
+		this.x /= v3.x;
+		this.y /= v3.y;
+		this.z /= v3.z;
+	
+		return this;
+	}
+	
+	mul_matrix(m4)
+	{
+		//列優先での掛け算		
+		
+		//
+		// m4の中のデータ列(列優先のデータ順)
+		//
+		// [ 0]:m00 [ 4]:m01 [ 8]:m02 [12]:m03
+		// [ 1]:m10 [ 5]:m11 [ 9]:m12 [13]:m13
+		// [ 2]:m20 [ 6]:m21 [10]:m22 [14]:m23
+		// [ 3]:m30 [ 7]:m31 [11]:m32 [15]:m33
+		//
+		const xx = m4.m[ 0] * this.x + m4.m[ 4] * this.y + m4.m[ 8] * this.z + m4.m[12];
+		const yy = m4.m[ 1] * this.x + m4.m[ 5] * this.y + m4.m[ 9] * this.z + m4.m[13];
+		const zz = m4.m[ 2] * this.x + m4.m[ 6] * this.y + m4.m[10] * this.z + m4.m[14];
+		
+		this.x = xx;
+		this.y = yy;
+		this.z = zz;
+		
+		return this;
+	}
+	
+	//1次元配列で3次元ベクトルを返す
+	exportSingleArray()
+	{
+		return [ this.x, this.y, this.z ];
+	}
+}
+
+//4次元ベクトル管理人
+class VectorMan4
+{
+	//コンストラクタ
+	constructor(x = 0,y = 0,z = 0,w = 1)
+	{
+		//プロパティの初期化
+		this.setValue(x,y,z,w);
+	}
+	
+	//値の一括セット
+	setValue(x,y,z,w)
+	{
+		this.x = x;
+		this.y = y;
+		this.z = z;
+		this.w = w;
+	}
+	
+	//コピー
+	copy(v4)
+	{
+		this.x = v4.x;
+		this.y = v4.y;
+		this.z = v4.z;
+		this.w = v4.w;
+	}
+	
+	//単位ベクトルに変換
+	normalize()
+	{
+		//単位ベクトルとは、長さが1のベクトルのこと
+		//なので、各値を長さで割ってベクトルの長さが1
+		//になるようにする
+		const x   = this.x;
+		const y   = this.y;
+		const z   = this.z;
+		const w   = this.w;
+		const len = Math.sqrt(x*x + y*y + z*z + w*w);
+		
+		this.x /= len;
+		this.y /= len;
+		this.z /= len;
+		this.w /= len;
+	}
+	
+	//ベクトル同士の四則演算
+	add(v4)
+	{
+		this.x += v4.x;
+		this.y += v4.y;
+		this.z += v4.z;
+		this.w += v4.w;
+	
+		return this;
+	}
+	
+	sub(v4)
+	{
+		this.x -= v4.x;
+		this.y -= v4.y;
+		this.z -= v4.z;
+		this.w -= v4.w;
+
+		return this;
+	}
+	
+	mul(v4)
+	{
+		this.x *= v4.x;
+		this.y *= v4.y;
+		this.z *= v4.z;
+		this.w *= v4.w;
+	
+		return this;
+	}
+	
+	div(v4)
+	{
+		this.x /= v4.x;
+		this.y /= v4.y;
+		this.z /= v4.z;
+		this.w /= v4.w;
+	
+		return this;
+	}
+	
+	mul_matrix(m4)
+	{
+		//行列との掛け算(列優先の場合は行列側を行ベクトルとして横にかける)
+		//
+		// m4の中のデータ列(列優先のデータ順)
+		//
+		// [ 0]:m00 [ 4]:m01 [ 8]:m02 [12]:m03
+		// [ 1]:m10 [ 5]:m11 [ 9]:m12 [13]:m13
+		// [ 2]:m20 [ 6]:m21 [10]:m22 [14]:m23
+		// [ 3]:m30 [ 7]:m31 [11]:m32 [15]:m33
+		//
+		const xx = m4.m[ 0] * this.x + m4.m[ 4] * this.y + m4.m[ 8] * this.z + m4.m[12] * this.w;
+		const yy = m4.m[ 1] * this.x + m4.m[ 5] * this.y + m4.m[ 9] * this.z + m4.m[13] * this.w;
+		const zz = m4.m[ 2] * this.x + m4.m[ 6] * this.y + m4.m[10] * this.z + m4.m[14] * this.w;
+		const ww = m4.m[ 3] * this.x + m4.m[ 7] * this.y + m4.m[11] * this.z + m4.m[15] * this.w;
+
+		this.x = xx;
+		this.y = yy;
+		this.z = zz;
+		this.w = ww;
+		
+		return this;
+	}
+	
+	//1次元配列で4次元ベクトルを返す
+	exportSingleArray()
+	{
+		return [ this.x, this.y, this.z, this.w ];
+	}
+}
+
+//4次元行列管理人
+class MatrixMan4
+{
+	//コンストラクタ
+	constructor()
+	{
+		//列優先データ順で格納します
+		//
+		// [ 0]:m00 [ 4]:m01 [ 8]:m02 [12]:m03
+		// [ 1]:m10 [ 5]:m11 [ 9]:m12 [13]:m13
+		// [ 2]:m20 [ 6]:m21 [10]:m22 [14]:m23
+		// [ 3]:m30 [ 7]:m31 [11]:m32 [15]:m33
+		//
+		
+		this.m = new Float32Array(16);
+		
+		//単位行列で初期化しておく
+		this.initialize();
+	}
+	
+	//コピー
+	copy(m4)
+	{
+		this.m.set(m4.m);
+	}
+
+	//単位行列で初期化
+	initialize()
+	{
+		//単位行列とはこういうもの
+		//| 1 0 0 0 |
+		//| 0 1 0 0 |
+		//| 0 0 1 0 |
+		//| 0 0 0 1 |
+		
+		this.m[ 0] = 1.0; this.m[ 4] = 0.0; this.m[ 8] = 0.0; this.m[12] = 0.0;
+		this.m[ 1] = 0.0; this.m[ 5] = 1.0; this.m[ 9] = 0.0; this.m[13] = 0.0;
+		this.m[ 2] = 0.0; this.m[ 6] = 0.0; this.m[10] = 1.0; this.m[14] = 0.0;
+		this.m[ 3] = 0.0; this.m[ 7] = 0.0; this.m[11] = 0.0; this.m[15] = 1.0;
+	}
+
+	//スケール変換行列の作成
+	scale(sx,sy,sz)
+	{
+		//スケール変換行列とはこういうもの
+		//sx,sy,szはそれぞれの軸での拡大率
+		//| sx  0  0  0 |
+		//|  0 sy  0  0 |
+		//|  0  0 sz  0 | 
+		//|  0  0  0  1 |
+
+		this.m[ 0] = sx;  this.m[ 4] = 0.0; this.m[ 8] = 0.0; this.m[12] = 0.0;
+		this.m[ 1] = 0.0; this.m[ 5] = sy;  this.m[ 9] = 0.0; this.m[13] = 0.0;
+		this.m[ 2] = 0.0; this.m[ 6] = 0.0; this.m[10] = sz;  this.m[14] = 0.0;
+		this.m[ 3] = 0.0; this.m[ 7] = 0.0; this.m[11] = 0.0; this.m[15] = 1.0;
+	}
+	
+	//X軸回転行列の作成(rはラジアン単位)
+	rotateX(r)
+	{
+		const sinX = Math.sin(r);
+		const cosX = Math.cos(r);
+		
+		//X軸回転行列とはこういうもの(列優先での配置)
+		//| 1    0     0    0 |
+		//| 0 cosX -sinX    0 |
+		//| 0 sinX  cosX    0 |
+		//| 0    0     0    1 |	
+		
+		this.m[ 0] = 1.0; this.m[ 4] =  0.0; this.m[ 8] =   0.0; this.m[12] = 0.0;
+		this.m[ 1] = 0.0; this.m[ 5] = cosX; this.m[ 9] = -sinX; this.m[13] = 0.0;
+		this.m[ 2] = 0.0; this.m[ 6] = sinX; this.m[10] =  cosX; this.m[14] = 0.0;
+		this.m[ 3] = 0.0; this.m[ 7] =  0.0; this.m[11] =   0.0; this.m[15] = 1.0;
+	}
+	
+	//Y軸回転行列の作成(rはラジアン単位)
+	rotateY(r)
+	{
+		const sinY = Math.sin(r);
+		const cosY = Math.cos(r);
+
+		//Ｙ軸回転行列とはこういうもの(列優先での配置)
+		//|  cosY   0 sinY    0 |
+		//|     0   1    0    0 |
+		//| -sinY   0 cosY    0 |
+		//|     0   0    0    1 |
+		
+		this.m[ 0] =  cosY; this.m[ 4] = 0.0; this.m[ 8] = sinY; this.m[12] = 0.0;
+		this.m[ 1] =   0.0; this.m[ 5] = 1.0; this.m[ 9] =  0.0; this.m[13] = 0.0;
+		this.m[ 2] = -sinY; this.m[ 6] = 0.0; this.m[10] = cosY; this.m[14] = 0.0;
+		this.m[ 3] =   0.0; this.m[ 7] = 0.0; this.m[11] =  0.0; this.m[15] = 1.0;
+	}
+	
+	//Z軸回転行列の作成(rはラジアン単位)
+	rotateZ(r)
+	{
+		const sinZ = Math.sin(r);
+		const cosZ = Math.cos(r);	
+
+		//Ｚ軸回転行列とはこういうもの(列優先での配置)
+		//| cosZ -sinZ   0   0 |
+		//| sinZ  cosZ   0   0 |
+		//|    0     0   1   0 |
+		//|    0     0   0   1 |	
+		
+		this.m[ 0] = cosZ; this.m[ 4] = -sinZ; this.m[ 8] = 0.0; this.m[12] = 0.0;
+		this.m[ 1] = sinZ; this.m[ 5] =  cosZ; this.m[ 9] = 0.0; this.m[13] = 0.0;
+		this.m[ 2] =  0.0; this.m[ 6] =   0.0; this.m[10] = 1.0; this.m[14] = 0.0;
+		this.m[ 3] =  0.0; this.m[ 7] =   0.0; this.m[11] = 0.0; this.m[15] = 1.0;
+	}
+	
+	//平行移動行列の作成
+	translate(tx,ty,tz)
+	{
+		//平行移動行列とはこういうもの(列優先での配置)
+		//|  1  0  0 tx |
+		//|  0  1  0 ty |
+		//|  0  0  1 tz |
+		//|  0  0  0  1 |
+		
+		this.m[ 0] = 1.0; this.m[ 4] = 0.0; this.m[ 8] =  0.0; this.m[12] =  tx;
+		this.m[ 1] = 0.0; this.m[ 5] = 1.0; this.m[ 9] =  0.0; this.m[13] =  ty;
+		this.m[ 2] = 0.0; this.m[ 6] = 0.0; this.m[10] =  1.0; this.m[14] =  tz;
+		this.m[ 3] = 0.0; this.m[ 7] = 0.0; this.m[11] =  0.0; this.m[15] = 1.0;
+	}
+	
+	//ビュー変換行列の作成
+	view(v3from,v3to,v3up)
+	{
+		//オブジェクトをカメラから見た位置へ変換するための行列
+	
+		//v3from	カメラ（視点）の位置
+		//v3to		注視点
+		//v3up		カメラの上方向
+		let vecX = new VectorMan3();	//X軸ベクトル
+		let vecY = new VectorMan3();	//Y軸ベクトル
+		let vecZ = new VectorMan3();	//Z軸ベクトル
+
+		// 奥行きを示す Z方向ベクトルを取得する。
+	    // 視点から注視点までの差である。これは
+	    // 注視する方向 (通常-Z) である。
+	    
+		//カメラ（視点）から注視点までのベクトルを算出
+		vecZ.copy(v3from);		//vecZ = v3from - v3to の
+		vecZ.sub(v3to)	;		//ベクトル計算(右手座標系用)
+		
+		vecZ.normalize();		//単位ベクトル化
+
+		// 注視する方向(Z方向ベクトル)と カメラの上方向を表すupベクトル
+		// の外積から直交するX方向ベクトル(通常+X)を算出し、さらにX方向
+		// ベクトルとZ方向ベクトルとの外積により、X-Z平面に直交するY方向
+		// ベクトル(通常+Y)を導きます。
+	    
+		vecX.crossProduct(v3up,vecZ);	//外積
+		vecX.normalize();				//単位ベクトル化
+		vecY.crossProduct(vecZ,vecX);	//外積
+		vecY.normalize();				//単位ベクトル化
+		
+		// 行列の構築を開始する。最初の 3 つの行には、
+	    // ビューを回転して注視点に向けるためのベクトルが含まれる。
+	    // point.
+		// 4番目の行には平行移動の値(各方向のベクトルとfromとの内積)
+		// が含まれる。 
+	    // 視点を中心とした回転が行われる。(列優先での配置)
+	    //
+	    //   回転         回転          回転      平行移動
+		//| vecX.x       vecX.y        vecX.z  -(vecX・from) |
+		//| vecY.x       vecY.y        vecY.z  -(vecY・from) |
+		//| vecZ.x       vecZ.y        vecZ.z  -(vecZ・from) |
+		//|    0            0             0           1      |
+
+		//行列に当てはめる
+		this.m[ 0] = vecX.x; this.m[ 4] = vecX.y; this.m[ 8] = vecX.z; this.m[12] = -(v3from.dotProduct(vecX));
+		this.m[ 1] = vecY.x; this.m[ 5] = vecY.y; this.m[ 9] = vecY.z; this.m[13] = -(v3from.dotProduct(vecY));
+		this.m[ 2] = vecZ.x; this.m[ 6] = vecZ.y; this.m[10] = vecZ.z; this.m[14] = -(v3from.dotProduct(vecZ));
+		this.m[ 3] = 0.0;    this.m[ 7] = 0.0;    this.m[11] = 0.0;    this.m[15] =  1.0;
+	}
+	
+	//プロジェクション行列の作成OpenGL準拠版
+	projectionOpenGL(nearZ,farZ,fov,aspect)
+	{
+		//OpenGL準拠の射影変換行列を作成します
+		//
+		// 下記のサイトの列優先用(OpenGL用)のものを参考にしています。
+		// https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/opengl-perspective-projection-matrix
+		// 
+		
+		// 列優先用
+		// 
+		// |   2*n/(r-l)      0         (r+l)/(r-l)         0       |
+		// |      0        2*n/(t-b)    (t+b)/(t-b)         0       |
+		// |      0           0        -(f+n)/(f-n)  -(2*f*n)/(f-n) |
+		// |      0           0             -1              0       |
+		
+		//nearZ		視点からスクリーンまでの距離(正の値をセットすること)
+		//farZ		視点から視界の限界までの距離(正の値をセットすること)
+		//fov		視野角（ラジアン単位）
+		//aspect	幅基準のアスペクト比(W/H)
+		
+		// 右手座標系の空間
+		//
+		//       +Y
+		//        |<-near->+ top
+		//        |      ／| 
+		//        |    ／  | 
+		//        |  ／    | scale
+		//        |／)fov/2|
+		// +Z-----+--------+-----------
+		//        |＼)     |
+		//        |  ＼    |
+		//        |    ＼  |
+		//        |      ＼|
+		//        |        +bottom
+		//
+		
+		const n     = nearZ;
+		const f     = farZ;
+		const scale = Math.tan(fov * 0.5) * n;
+		const r     = aspect * scale;
+		const l     = -r;
+		const t     = scale;
+		const b     = -t;
+		
+		this.initialize();
+		
+		this.m[ 0] = 2 * n / (r - l);
+		this.m[ 5] = 2 * n / (t - b);
+		this.m[ 8] = (r + l) / (r - l); //実質0
+		this.m[ 9] = (t + b) / (t - b); //実質0
+		this.m[10] = -(f + n) / (f - n);
+		this.m[11] = -1.0;
+		this.m[14] = -(2 * f * n) / (f - n);
+		this.m[15] = 0.0;
+		
+		//
+		// この変換をかけることによって、
+		//
+		// X = (左)   -1.0 ～ 1.0(右)
+		// Y = (下)   -1.0 ～ 1.0(上)
+		// Z = (nearZ)-1.0 ～ 1.0(farZ)
+		//
+		// という視錐台の範囲でのクリッピング空間に変換されます。
+		// XとYは-1.0～1.0を描画するスクリーンの領域にマッピング
+		// することでViewPort変換ができます。
+		// 射影変換後は、手前がZ=-1で奥が+1という左手座標系の空間
+		// になっていることに注意してください。
+		//
+	}
+
+	//ビューポート行列の作成
+	viewPort(x,y,width,height)
+	{
+		//この行列は、ビューポートの寸法および指定の深度範囲に従って
+		//頂点をスケーリングし、その頂点をレンダリング ターゲット
+		//サーフェスの適切な位置座標に平行移動する。また、この行列は、
+		//y が下方に増加する左上角のスクリーン原点を反映するために 
+		//y 座標を反転する。この行列を適用した後も、頂点は同次である。
+		//つまり、頂点は依然として [x,y,z,w] 頂点として存在するので、
+		//ラスタライザに送る前に頂点を非同次にトランスフォームしなけ
+		//ればならない。
+		//（DirectX8.0日本語ヘルプより抜粋）
+
+		//列優先での配置
+		//
+		//  X座標のScaling  Y座標のScaling  Z座標は     原点を画面の中心に
+		//                  ＆ 上下反転     そのまま    平行移動
+		//| Width / 2       0               0           Width  / 2 + X |
+		//| 0               -Height / 2     0           Height / 2 + Y |
+   		//| 0               0               1           0              |
+		//| 1	            1               0           1              |
+		
+		this.initialize();
+		
+		this.m[ 0] =  width  / 2.0;
+		this.m[ 5] = -height / 2.0;
+		this.m[12] = width   / 2.0 + x;
+		this.m[13] = height  / 2.0 + y;
+	}
+
+	//行列同士の足し算
+	add(m4)
+	{
+		this.m[ 0] += m4.m[ 0];
+		this.m[ 1] += m4.m[ 1];
+		this.m[ 2] += m4.m[ 2];
+		this.m[ 3] += m4.m[ 3];
+		
+		this.m[ 4] += m4.m[ 4];
+		this.m[ 5] += m4.m[ 5];
+		this.m[ 6] += m4.m[ 6];
+		this.m[ 7] += m4.m[ 7];
+
+		this.m[ 8] += m4.m[ 8];
+		this.m[ 9] += m4.m[ 9];
+		this.m[10] += m4.m[10];
+		this.m[11] += m4.m[11];
+
+		this.m[12] += m4.m[12];
+		this.m[13] += m4.m[13];
+		this.m[14] += m4.m[14];
+		this.m[15] += m4.m[15];
+
+		return this;
+	}
+	
+	//行列同士の引き算
+	sub(m4)
+	{
+		this.m[ 0] -= m4.m[ 0];
+		this.m[ 1] -= m4.m[ 1];
+		this.m[ 2] -= m4.m[ 2];
+		this.m[ 3] -= m4.m[ 3];
+		
+		this.m[ 4] -= m4.m[ 4];
+		this.m[ 5] -= m4.m[ 5];
+		this.m[ 6] -= m4.m[ 6];
+		this.m[ 7] -= m4.m[ 7];
+
+		this.m[ 8] -= m4.m[ 8];
+		this.m[ 9] -= m4.m[ 9];
+		this.m[10] -= m4.m[10];
+		this.m[11] -= m4.m[11];
+
+		this.m[12] -= m4.m[12];
+		this.m[13] -= m4.m[13];
+		this.m[14] -= m4.m[14];
+		this.m[15] -= m4.m[15];
+
+		return this;
+	}
+	
+	//行列同士の掛け算
+	mul(m4)
+	{
+		const _00 = this.m[ 0] * m4.m[ 0] + this.m[ 1] * m4.m[ 4] + this.m[ 2] * m4.m[ 8] + this.m[ 3] * m4.m[12];
+		const _01 = this.m[ 0] * m4.m[ 1] + this.m[ 1] * m4.m[ 5] + this.m[ 2] * m4.m[ 9] + this.m[ 3] * m4.m[13];
+		const _02 = this.m[ 0] * m4.m[ 2] + this.m[ 1] * m4.m[ 6] + this.m[ 2] * m4.m[10] + this.m[ 3] * m4.m[14];
+		const _03 = this.m[ 0] * m4.m[ 3] + this.m[ 1] * m4.m[ 7] + this.m[ 2] * m4.m[11] + this.m[ 3] * m4.m[15];
+
+		const _10 = this.m[ 4] * m4.m[ 0] + this.m[ 5] * m4.m[ 4] + this.m[ 6] * m4.m[ 8] + this.m[ 7] * m4.m[12];
+		const _11 = this.m[ 4] * m4.m[ 1] + this.m[ 5] * m4.m[ 5] + this.m[ 6] * m4.m[ 9] + this.m[ 7] * m4.m[13];
+		const _12 = this.m[ 4] * m4.m[ 2] + this.m[ 5] * m4.m[ 6] + this.m[ 6] * m4.m[10] + this.m[ 7] * m4.m[14];
+		const _13 = this.m[ 4] * m4.m[ 3] + this.m[ 5] * m4.m[ 7] + this.m[ 6] * m4.m[11] + this.m[ 7] * m4.m[15];
+			
+		const _20 = this.m[ 8] * m4.m[ 0] + this.m[ 9] * m4.m[ 4] + this.m[10] * m4.m[ 8] + this.m[11] * m4.m[12];
+		const _21 = this.m[ 8] * m4.m[ 1] + this.m[ 9] * m4.m[ 5] + this.m[10] * m4.m[ 9] + this.m[11] * m4.m[13];
+		const _22 = this.m[ 8] * m4.m[ 2] + this.m[ 9] * m4.m[ 6] + this.m[10] * m4.m[10] + this.m[11] * m4.m[14];
+		const _23 = this.m[ 8] * m4.m[ 3] + this.m[ 9] * m4.m[ 7] + this.m[10] * m4.m[11] + this.m[11] * m4.m[15];
+			
+		const _30 = this.m[12] * m4.m[ 0] + this.m[13] * m4.m[ 4] + this.m[14] * m4.m[ 8] + this.m[15] * m4.m[12];
+		const _31 = this.m[12] * m4.m[ 1] + this.m[13] * m4.m[ 5] + this.m[14] * m4.m[ 9] + this.m[15] * m4.m[13];
+		const _32 = this.m[12] * m4.m[ 2] + this.m[13] * m4.m[ 6] + this.m[14] * m4.m[10] + this.m[15] * m4.m[14];
+		const _33 = this.m[12] * m4.m[ 3] + this.m[13] * m4.m[ 7] + this.m[14] * m4.m[11] + this.m[15] * m4.m[15];
+			
+		this.m[ 0] = _00; this.m[ 1] = _01; this.m[ 2] = _02; this.m[ 3] = _03;
+		this.m[ 4] = _10; this.m[ 5] = _11; this.m[ 6] = _12; this.m[ 7] = _13;
+		this.m[ 8] = _20; this.m[ 9] = _21; this.m[10] = _22; this.m[11] = _23;
+		this.m[12] = _30; this.m[13] = _31; this.m[14] = _32; this.m[15] = _33;
+		
+		return this;
+	}
+}
+
+//頂点情報管理人
+class VertexMan
+{
+	//コンストラクタ
+	constructor()
+	{
+		this.vv     = new VectorMan4();		//頂点座標(後々の座標変換時に都合が良いように4次にしてます)
+		this.vn     = new VectorMan3();		//頂点の法線ベクトル
+		//this.R      = 0;					//頂点カラー(R)
+		//this.G      = 0;					//頂点カラー(G)
+		//this.B      = 0;					//頂点カラー(B)
+	}
+
+	//コピー
+	copy(vtx)
+	{
+		this.vv.copy(vtx.vv);
+		this.vn.copy(vtx.vn);
+		//this.R      = vtx.R;
+		//this.G      = vtx.G;
+		//this.B      = vtx.B;
+	}
+	
+}
+
+//クォータニオン管理人
+class QuaternionMan
+{
+	//コンストラクタ
+	constructor(x = 0,y = 0,z = 0,w = 0)
+	{
+		//プロパティの初期化
+		this.setValue(x,y,z,w);
+	}
+	
+	//値の一括セット
+	setValue(x,y,z,w)
+	{
+		this.x = x;
+		this.y = y;
+		this.z = z;
+		this.w = w;
+	}
+	
+	//コピー
+	copy(q)
+	{
+		this.x = q.x;
+		this.y = q.y;
+		this.z = q.z;
+		this.w = q.w;
+	}
+	
+	//目的の方向を向くクォータニオンを計算
+	createQuat(obj_posv,obj_nv,target_posv)
+	{
+		//
+		// obj_posv    … オブジェクトの中心位置
+		// obj_nv      … オブジェクトの法線ベクトル(向いてる方向)
+		// target_posv … 向きたい位置
+	    //
+	    
+	    //向きたい方向のベクトル(正規化したもの)を算出します
+	    let dirx = target_posv.x - obj_posv.x;
+	    let diry = target_posv.y - obj_posv.y;
+	    let dirz = target_posv.z - obj_posv.z;
+	    let dirl = Math.sqrt(dirx*dirx + diry*diry + dirz*dirz);
+	    if(dirl != 0)
+	    {
+	    	dirl = 1.0 / dirl;
+			dirx *= dirl;
+			diry *= dirl;
+			dirz *= dirl;
+		}
+	    
+	    //オブジェクトの法線との外積を計算して、
+	    //回転軸ベクトル(正規化したもの)を算出します
+	    //外積を計算して回転軸ベクトルとする
+	    let rotx = obj_nv.y * dirz - obj_nv.z * diry;
+	    let roty = obj_nv.z * dirx - obj_nv.x * dirz;
+	    let rotz = obj_nv.x * diry - obj_nv.y * dirx;
+	    let rotl = Math.sqrt(rotx*rotx + roty*roty + rotz*rotz);
+	    if(rotl != 0)
+	    {
+	    	rotl = 1.0 / rotl;
+			rotx *= rotl;
+			roty *= rotl;
+			rotz *= rotl;
+		}
+		
+	    //内積から得られる角度を回転角度とする
+	    const r = Math.acos(obj_nv.x * dirx + obj_nv.y * diry + obj_nv.z * dirz);
+	    
+	    //クォータニオンのx,y,z,wを計算
+	    //
+	    // rv = 回転軸ベクトル
+		// θ = 回転角度
+		// x  = rv.x * sin(θ/2)
+		// y  = rv.y * sin(θ/2)
+		// z  = rv.z * sin(θ/2)
+		// w  = cos(θ/2)
+		//
+		const s2 = Math.sin(r/2);
+		this.x = rotx * s2;
+		this.y = roty * s2;
+		this.z = rotz * s2;
+		this.w = Math.cos(r/2);
+	}
+	
+	//回転行列に変換
+	convertMatrix(mat4)
+	{
+		//クォータニオンからの回転行列作成
+		//
+		// 参考(このサイトは行優先行列)
+		// http://marupeke296.com/DXG_No58_RotQuaternionTrans.html
+		//
+		// クォータニオンの４要素 x,y,z,wから回転行列にする
+		//
+		// | 1-2y^2-2z^2     2xy-2wz      2xz+2wy         0       |
+		// |    2xy+2wz   1-2x^2-2z^2     2yz-2wx         0       |
+		// |    2xz-2wy      2yz+2wx   1-2x^2-2y^2        0       |
+		// |       0            0            0            1       |
+		//
+		const x2 = 2.0 * this.x * this.x;	//2x^2
+		const y2 = 2.0 * this.y * this.y;	//2y^2
+		const z2 = 2.0 * this.z * this.z;	//2z^2
+		const xy = 2.0 * this.x * this.y;	//2xy
+		const xz = 2.0 * this.x * this.z;	//2xz
+		const yz = 2.0 * this.y * this.z;	//2yz
+		const wx = 2.0 * this.w * this.x;	//2wx
+		const wy = 2.0 * this.w * this.y;	//2wy
+		const wz = 2.0 * this.w * this.z;	//2wz
+		
+		mat4.m[ 0] = 1.0 - y2 - z2;		//m00
+		mat4.m[ 1] = xy + wz;			//m10
+		mat4.m[ 2] = xz - wy;			//m20
+		mat4.m[ 3] = 0.0;				//m30
+		
+		mat4.m[ 4] = xy - wz;			//m01
+		mat4.m[ 5] = 1.0 - x2 - z2;		//m11
+		mat4.m[ 6] = yz + wx;			//m21
+		mat4.m[ 7] = 0.0;				//m31
+		
+		mat4.m[ 8] = xz + wy;			//m02
+		mat4.m[ 9] = yz - wx;			//m12
+		mat4.m[10] = 1.0 - x2 - y2;		//m22
+		mat4.m[11] = 0.0;				//m32
+
+		mat4.m[12] = 0.0;				//m03
+		mat4.m[13] = 0.0;				//m13
+		mat4.m[14] = 0.0;				//m23
+		mat4.m[15] = 1.0;				//m33
+	}
+}
+
+const DEF_VERTEX_NUM_FOR_PRIMITIVE = 3;		//デフォルトの1プリミティブあたりの頂点数
+											//(デフォルトは三角形ポリゴンなので3)
+const DEF_TORUS_NUM                = 10;	//トーラスオブジェクトのデフォルト分割数
+const DEF_CYLINDER_NUM             = 10;	//シリンダー(円柱)オブジェクトのデフォルト分割数
+const DEF_PYRAMID_NUM              = 4;	    //ピラミッド(ｎ角錐)オブジェクトのデフォルト分割数
+const DEF_SPHERE_NUM               = 4;	    //球体オブジェクトのデフォルト分割数
+
+//3Dオブジェクト管理人のベース部分
+class Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		this.vertexList            = [];	//頂点データリスト
+		this.polyIndexList         = [];	//ポリゴンを形成する頂点のインデックスリスト
+		this.vertexNum             = 0;		//頂点数
+		this.vertexNumForPrimitive
+		 = DEF_VERTEX_NUM_FOR_PRIMITIVE;	//1プリミティブあたりの頂点数(通常3=三角形ポリゴン)
+		this.primitiveNum          = 0;		//プリミティブの数
+	}
+}
+
+//XY平面オブジェクト管理人
+class SquareXYObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create();
+	}
+
+	//オブジェクトの頂点リストを生成
+	create()
+	{
+		//データ領域の確保
+		const totalVertex    = 4;								//頂点の数
+		const totalPolygon   = 2;								//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		// XY平面の頂点は以下の順番で4点とします
+		//
+		// 0----2 
+		// |    |
+	    // |    |
+		// 1----3
+		//
+		// 各辺の長さはとりあず1.0として適当に
+		// 拡大して使います
+		// この平面の中心を(x,y)=(0,0)の原点として
+		// 各頂点の座標を指定します。
+		// X軸は左側がマイナス、Y軸は下側がマイナスです。
+		// この平面はXY平面なので、Z座標は全て0で扱います。
+		//
+		this.vertexList[0].vv.x = -0.5; this.vertexList[0].vv.y =  0.5; this.vertexList[0].vv.z = 0.0;
+		this.vertexList[1].vv.x = -0.5; this.vertexList[1].vv.y = -0.5; this.vertexList[1].vv.z = 0.0;
+		this.vertexList[2].vv.x =  0.5; this.vertexList[2].vv.y =  0.5; this.vertexList[2].vv.z = 0.0;
+		this.vertexList[3].vv.x =  0.5; this.vertexList[3].vv.y = -0.5; this.vertexList[3].vv.z = 0.0;
+		
+		// ポリゴン描画用に各頂点の描画順インデックスを作成
+		//
+		// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+		// 表とします。
+		// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点A,B,Cの
+		// ABベクトルとACベクトルとの外積で計算します。
+		//
+		// A----C 
+		// |  ／|
+	    // |／  |
+		// B----D
+		// 
+		// ベクトルの外積の結果はベクトルで得られ、下記の式で計算されます。
+		//
+		// <頂点A,B,Cをv0,v1,v2として、法線ベクトルとなるnベクトルを求める場合>
+		//
+		// va = v1 - v0
+		// vb = v2 - v0
+		// 
+		// n   = va×vb
+		// n.x = va.y * vb.z - va.z * vb.y;
+		// n.y = va.z * vb.x - va.x * vb.z;
+		// n.z = va.x * vb.y - va.y * vb.x;
+		//
+		// 座標値を当てはめてみる
+		// va.x = -0.5 - -0.5 =  0.0
+		// va.y = -0.5 -  0.5 = -1.0
+		// va.z =  0.0 -  0.0 =  0.0
+		// vb.x =  0.5 - -0.5 =  1.0
+		// vb.y =  0.5 -  0.5 =  0.0
+		// vb.z =  0.0 -  0.0 =  0.0
+		//
+		// n.x = -1.0 *  0.0 -  0.0 *  0.0 = 0.0 -  0.0 = 0.0
+		// n.y =  0.0 *  1.0 -  0.0 *  0.0 = 0.0 -  0.0 = 0.0
+		// n.z =  0.0 *  0.0 - -1.0 *  1.0 = 0.0 - -1.0 = 1.0
+		//
+		// XY平面に垂直なZ軸と平行になる+Zの法線ベクトルが計算できました。
+		// 右手座標系では、手前(カメラを向いている方向)が+Zなので、三角形
+		// ABCのポリゴンは表を向いていることになります。
+		//
+		// 時計回り(右回り)の三角形ACBの場合
+		// va.x =  0.5 - -0.5 =  1.0
+		// va.y =  0.5 -  0.5 =  0.0
+		// va.z =  0.0 -  0.0 =  0.0
+		// vb.x = -0.5 - -0.5 =  0.0
+		// vb.y = -0.5 -  0.5 = -1.0
+		// vb.z =  0.0 -  0.0 =  0.0
+		//
+		// n.x =  0.0 *  0.0 -  0.0 * -1.0 =  0.0 -  0.0 =  0.0
+		// n.y =  0.0 *  0.0 -  1.0 *  0.0 =  0.0 -  0.0 =  0.0
+		// n.z =  1.0 * -1.0 -  0.0 *  0.0 = -1.0 -  0.0 = -1.0
+		// 
+		// 時計回りの頂点順の場合、-Zになり、向こう側を向いていること
+		// になり、裏面扱いとなります。
+		//
+		// 四角形を構成する表を向くポリゴンは、△ABCと△CBDになります。
+		//
+		const drawIndexList = 
+		[
+			0,1,2, 2,1,3
+		];
+		for(let i = 0;i < totalPolyIndex;++i)
+		{
+			this.polyIndexList[i] = drawIndexList[i];
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//XZ平面オブジェクト管理人
+class SquareXZObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create();
+	}
+
+	//オブジェクトの頂点リストを生成
+	create()
+	{
+		//データ領域の確保
+		const totalVertex    = 4;								//頂点の数
+		const totalPolygon   = 2;								//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		// XZ平面の頂点は以下の順番で4点とします
+		//
+		// 0-----2 
+		// |     |
+	    // |     |
+		// 1-----3
+		//
+		// 各辺の長さはとりあず1.0として適当に
+		// 拡大して使います
+		// この平面の中心を(x,z)=(0,0)の原点として
+		// 各頂点の座標を指定します。
+		// X軸は左側がマイナス、Z軸は奥側がマイナスです。
+		// この平面はXZ平面なので、Y座標は全て0で扱います。
+		//
+		this.vertexList[0].vv.x = -0.5; this.vertexList[0].vv.y = 0.0; this.vertexList[0].vv.z = -0.5;
+		this.vertexList[1].vv.x = -0.5; this.vertexList[1].vv.y = 0.0; this.vertexList[1].vv.z =  0.5;
+		this.vertexList[2].vv.x =  0.5; this.vertexList[2].vv.y = 0.0; this.vertexList[2].vv.z = -0.5;
+		this.vertexList[3].vv.x =  0.5; this.vertexList[3].vv.y = 0.0; this.vertexList[3].vv.z =  0.5;
+		
+		// ポリゴン描画用に各頂点の描画順インデックスを作成
+		//
+		// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+		// 表とします。
+		// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点A,B,Cの
+		// ABベクトルとACベクトルとの外積で計算します。
+		//
+		// A----C 
+		// |  ／|
+	    // |／  |
+		// B----D
+		//
+		// XZ平面において、上向き(+Y)の方向に向く法線ベクトルを
+		// 外積で計算するには、頂点の描画順は、ABCとCBDになります。
+		//
+		const drawIndexList = 
+		[
+			0,1,2, 2,1,3
+		];
+		for(let i = 0;i < totalPolyIndex;++i)
+		{
+			this.polyIndexList[i] = drawIndexList[i];
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//立方体オブジェクト管理人
+class CubeObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create();
+	}
+
+	//オブジェクトの頂点リストを生成
+	create()
+	{
+		//データ領域の確保
+		const totalVertex    = 4 * 2;							//頂点の数
+		const totalPolygon   = 6 * 2;							//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		// 立方体の頂点は以下の順番で前と後ろの
+		// 計8点になります
+		//
+		// 0-----2  4-----6
+		// | 前  |  | 後  |
+	    // |     |  |     |
+		// 1-----3  5-----7
+		//
+		// 各辺の長さはとりあず1.0として適当に
+		// 拡大して使います
+		// 手前の面の頂点が0,1,2,3で奥の面の頂点が4,5,6,7です。
+		// 座標はOpenGLの右手座標系に合わせるので、+Zが手前で-Zが奥になります。
+		//	
+		this.vertexList[0].vv.x = -0.5; this.vertexList[0].vv.y =  0.5; this.vertexList[0].vv.z =  0.5;
+		this.vertexList[1].vv.x = -0.5; this.vertexList[1].vv.y = -0.5; this.vertexList[1].vv.z =  0.5;
+		this.vertexList[2].vv.x =  0.5; this.vertexList[2].vv.y =  0.5; this.vertexList[2].vv.z =  0.5;
+		this.vertexList[3].vv.x =  0.5; this.vertexList[3].vv.y = -0.5; this.vertexList[3].vv.z =  0.5;
+		this.vertexList[4].vv.x = -0.5; this.vertexList[4].vv.y =  0.5; this.vertexList[4].vv.z = -0.5;
+		this.vertexList[5].vv.x = -0.5; this.vertexList[5].vv.y = -0.5; this.vertexList[5].vv.z = -0.5;
+		this.vertexList[6].vv.x =  0.5; this.vertexList[6].vv.y =  0.5; this.vertexList[6].vv.z = -0.5;
+		this.vertexList[7].vv.x =  0.5; this.vertexList[7].vv.y = -0.5; this.vertexList[7].vv.z = -0.5;
+		
+		// ポリゴン描画用に各頂点の描画順インデックスを作成
+		//
+		// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+		// 表とします。
+		// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,C
+		// の場合、ABベクトルとACベクトルとの外積で計算します。
+		//
+		// A----C 
+		// |  ／|
+	    // |／  |
+		// B----D
+		//
+		// この法則に基づいて、もうひとつの△BCDの手前に
+		// 向ける頂点の描画順は、C,B,Dになります。
+		//
+		// 表：A,B,C,C,B,D
+		//
+		const drawIndexList = 
+		[
+			0,1,2,2,1,3,	//正面
+			6,7,4,4,7,5,	//背面(向こう側が表になる)
+			2,3,6,6,3,7,	//右面
+			4,5,0,0,5,1,	//左面
+			4,0,6,6,0,2,	//上面
+			1,5,3,3,5,7		//下面
+		];
+		for(let i = 0;i < totalPolyIndex;++i)
+		{
+			this.polyIndexList[i] = drawIndexList[i];
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//頂点インデックスに対応した境界線描画用のUV座標リストを作成
+		//
+		// -1,1  1,1
+		//   0----2 
+		//   |  ／|
+	    //   |／  |
+		//   1----3
+		// -1,-1 1,-1
+		//
+		const uvList = 
+		[
+			{ u: -1, v:  1 },
+			{ u: -1, v: -1 },
+			{ u:  1, v:  1 },
+			{ u:  1, v: -1 }
+		];
+		this.polyUVList = [];
+		for(let i = 0;i < totalPolyIndex;i += 6)
+		{
+			this.polyUVList.push(uvList[0]);
+			this.polyUVList.push(uvList[1]);
+			this.polyUVList.push(uvList[2]);
+			
+			this.polyUVList.push(uvList[2]);
+			this.polyUVList.push(uvList[1]);
+			this.polyUVList.push(uvList[3]);
+		}
+	}
+}
+
+//平面リングオブジェクト管理人
+class SquareRingObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create();
+	}
+
+	//オブジェクトの頂点リストを生成
+	create()
+	{
+		//データ領域の確保
+		const totalVertex    = 4 * 2;							//頂点の数
+		const totalPolygon   = 4 * 2 * 2;						//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		// 平面リングの頂点は以下の順番で前と後ろの
+		// 計8点になります
+		// 頂点の位置は立方体と同じですが、ポリゴンとして
+		// 利用する面は、正面と背面を除いた、側面2個と上面と
+		// 下面の計4つになります。1面に付きポリゴン2つ。
+		// かつ、内側も描画されるように内向きのポリゴンも
+		// 用意するので、さらに倍の、計4 * 2 * 2 = 16枚。
+		//
+		// 0-----2  4-----6
+		// | 前  |  | 後  |
+	    // |     |  |     |
+		// 1-----3  5-----7
+		//
+		// リングの円周となる正面から見た際の正方形の
+		// 各辺の長さはとりあず1.0として、リングの幅は
+		// 正方形の16分の1の0.0625にします。
+		// 表示する際には拡大して使います
+		// 手前の枠の頂点が0,1,2,3で奥の枠の頂点が4,5,6,7です。
+		// 座標はOpenGLの右手座標系に合わせるので、
+		// +Zが手前で-Zが奥になります。
+		//	
+		this.vertexList[0].vv.x = -0.5; this.vertexList[0].vv.y =  0.5; this.vertexList[0].vv.z =  0.0625/2;
+		this.vertexList[1].vv.x = -0.5; this.vertexList[1].vv.y = -0.5; this.vertexList[1].vv.z =  0.0625/2;
+		this.vertexList[2].vv.x =  0.5; this.vertexList[2].vv.y =  0.5; this.vertexList[2].vv.z =  0.0625/2;
+		this.vertexList[3].vv.x =  0.5; this.vertexList[3].vv.y = -0.5; this.vertexList[3].vv.z =  0.0625/2;
+		this.vertexList[4].vv.x = -0.5; this.vertexList[4].vv.y =  0.5; this.vertexList[4].vv.z = -0.0625/2;
+		this.vertexList[5].vv.x = -0.5; this.vertexList[5].vv.y = -0.5; this.vertexList[5].vv.z = -0.0625/2;
+		this.vertexList[6].vv.x =  0.5; this.vertexList[6].vv.y =  0.5; this.vertexList[6].vv.z = -0.0625/2;
+		this.vertexList[7].vv.x =  0.5; this.vertexList[7].vv.y = -0.5; this.vertexList[7].vv.z = -0.0625/2;
+
+		// ポリゴン描画用に各頂点の描画順インデックスを作成
+		//
+		// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+		// 表とします。
+		// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,C
+		// の場合、ABベクトルとACベクトルとの外積で計算します。
+		// 
+		// A----C 
+		// |  ／|
+	    // |／  |
+		// B----D
+		//
+		// この法則に基づいて、もうひとつの△BCDの手前に
+		// 向ける頂点の描画順は、C,B,Dになります。
+		// 
+		// 今回は内向きの面も作るので、反対向きの法線を
+		// 持つポリゴンの頂点の描画順は、A,C,BとC,D,Bに
+		// なります。
+		//
+		const drawIndexList = 
+		[
+			4,0,6, 6,0,2,	//上面(表)
+			4,6,0, 6,2,0,	//上面(裏)
+			5,7,1, 7,3,1,	//下面(表)
+			5,1,7, 7,1,3,	//下面(裏)
+			4,5,0, 0,5,1,	//左面(表)
+			4,0,5, 0,1,5,	//左面(裏)
+			2,3,6, 6,3,7,	//右面(表)
+			2,6,3, 6,7,3	//右面(裏)
+		];
+		for(let i = 0;i < totalPolyIndex;++i)
+		{
+			this.polyIndexList[i] = drawIndexList[i];
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//トーラスオブジェクト管理人
+class TorusObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create(DEF_TORUS_NUM);
+	}
+
+	//オブジェクトの頂点リストを生成
+	create(n)
+	{
+		//データ領域の確保
+		const totalVertex    = n * n;							//頂点の数
+		const totalPolygon   = totalVertex * 2;					//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		//
+		// n角形の各頂点座標をY軸を中心に上から見てn角形になるように回転させて
+		// トーラス図形を完成させます
+		// これは、基本となるn角形をX-Y平面で作成し、X方向にn角形の直径分平行
+		// 移動させた後、Y軸を中心に360/n度分回転させることで座標が計算できます
+		//
+
+		//n角形の基本座標を設定
+		let baseVectors = [];
+		const radius    = 0.8;					//n角形の半径
+		let   angle     = 0.0;					//n角形の角度
+		let   addAngle  = (Math.PI * 2.0 / n);	//n角形の角度増分値
+		for(let i = 0;i < n;++i,angle += addAngle)
+		{
+			baseVectors.push(new VectorMan4());
+			baseVectors[i].x = radius * Math.cos(angle);
+			baseVectors[i].y = radius * Math.sin(angle);
+			baseVectors[i].z = 0.0;
+		}
+
+		//基本図形をn角形の直径分X方向に平行移動させるための
+		//平行移動行列を作成
+		let mMove = new MatrixMan4();
+		mMove.translate(radius * 2.0,0.0,0.0);
+
+		//基本図形を平行移動させた後、Y軸を中心に回転させて
+		//トーラス図形の頂点座標を計算します
+		let index = 0;
+		angle = 0.0;
+		for(let i = 0;i < n;++i,angle += addAngle)
+		{
+			//回転行列を作成
+			let mRotate = new MatrixMan4();
+			mRotate.rotateY(-angle);		//時計回り(右回り)に回す
+
+			//平行移動行列と合成
+			let m = new MatrixMan4();
+			m = m.mul(mMove);
+			m = m.mul(mRotate);
+
+			//基本図形を変換して座標を作成
+			for(let j = 0;j < n;++j)
+			{
+				this.vertexList[index].vv.copy(baseVectors[j]);
+				this.vertexList[index].vv.mul_matrix(m);
+				index++;
+			}
+		}	
+		baseVectors = [];	//もう使わない
+
+		//ポリゴン用頂点の描画順インデックスリストを作成
+		index = 0;
+
+		//Y軸中心(X-Z平面)の回転ループ	
+		for(let xz = 0;xz < n;++xz)
+		{
+			const firstpos = n * xz;	//各多角形の最初の頂点のインデックス
+
+			//X-Y平面での多角形頂点ループ
+			//
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+			// 表とします。
+			// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,C
+			// の場合、ABベクトルとACベクトルとの外積で計算します。
+			// 
+			// A----C 
+			// |  ／|
+	    	// |／  |
+			// B----D
+			//
+			// この法則に基づいて、もうひとつの△BCDの手前に
+			// 向ける頂点の描画順は、C,B,Dになります。
+			//
+			for(let xy = 0;xy < n;++xy)
+			{
+				//番号は4角形トーラスでのインデックス順
+				// n = 4 の場合
+				//
+				//   0+--+4  表: 0,1,4,4,1,5
+				//    |／|   
+				//   1+--+5  表: 1,2,5,5,1,2
+				//    |／|   
+				//   2+--+6  ：
+				//    |／|   ：
+				//   3+--+7  表: 3,0,7,7,0,4
+				//    |／|   
+				//   0+--+4
+				//   ↑
+				//   firstpos
+				//
+				
+				this.polyIndexList[index++] =  firstpos +   xy;									//0
+				this.polyIndexList[index++] =  firstpos + ((xy + 1)  % n);						//1
+				this.polyIndexList[index++] = (firstpos +  (xy + n)          ) % totalVertex;	//4
+				this.polyIndexList[index++] = (firstpos +  (xy + n)          ) % totalVertex;	//4
+				this.polyIndexList[index++] =  firstpos + ((xy + 1)  % n);						//1
+				this.polyIndexList[index++] = (firstpos + ((xy + 1)  % n) + n) % totalVertex;	//5
+			}
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//ねじれるトーラスオブジェクト管理人
+class TwistTorusObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create(8);
+		
+		//ねじれアクションカウンタ初期化
+		this.act_cnt = 0;
+	}
+	
+	//オブジェクトの頂点リストを生成
+	create(n)
+	{
+		//データ領域の確保
+		const r_n            = 16;								//断面の数
+		const totalVertex    = n * r_n;							//頂点の数
+		const totalPolygon   = totalVertex * 2;					//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList   = new Int16Array(totalPolyIndex);
+		this.vertexNum       = totalVertex;
+		this.primitiveNum    = totalPolygon;
+		this.unit_vertex_num = n;				//断面1つの頂点数
+		this.unit_round_num  = r_n;				//断面の個数
+		
+		//
+		// n角形の各頂点座標をY軸を中心に上から見てn角形になるように回転させて
+		// トーラス図形を完成させます
+		// これは、基本となるn角形をX-Y平面で作成し、X方向にin_radius分平行
+		// 移動させた後、Y軸を中心に360/r_n度分回転させることで座標が計算できます
+		//
+
+		//n角形の基本座標を設定
+		let baseVectors = [];
+		const radius    = 0.8;					//n角形の半径
+		let   angle     = 0.0;					//n角形の角度
+		let   addAngle  = (Math.PI * 2.0 / n);	//n角形の角度増分値
+		for(let i = 0;i < n;++i,angle += addAngle)
+		{
+			baseVectors.push(new VectorMan4());
+			baseVectors[i].x = radius * Math.cos(angle);
+			baseVectors[i].y = radius * Math.sin(angle);
+			baseVectors[i].z = 0.0;
+		}
+
+		//基本図形を内側の半径分平行移動させるための
+		//平行移動行列を作成
+		const in_radius = 1.8;
+		let mMove = new MatrixMan4();
+		mMove.translate(in_radius,0.0,0.0);
+
+		//ねじれアクション用の情報配列を初期化しておく
+		this.act_info = [];
+		for(let i = 0;i < r_n;++i)
+		{
+			let info = { tx: in_radius, ry: 0, dir: 0, a: 0, r: 0 };
+			this.act_info.push(info);
+		}
+
+		//基本図形を平行移動させた後、Y軸を中心に回転させて
+		//トーラス図形の頂点座標を計算します
+		let index       = 0;
+		let r_angle     = 0.0;
+		let r_addAngle  = (Math.PI * 2.0 / r_n);	//n角形の角度増分値
+		for(let i = 0;i < r_n;++i,r_angle += r_addAngle)
+		{
+			//回転行列を作成
+			let mRotate = new MatrixMan4();
+			mRotate.rotateY(-r_angle);		//時計回り(右回り)に回す
+
+			//平行移動行列と合成
+			let m = new MatrixMan4();
+			m = m.mul(mMove);
+			m = m.mul(mRotate);
+
+			//基本図形を変換して座標を作成
+			for(let j = 0;j < n;++j)
+			{
+				this.vertexList[index].vv.copy(baseVectors[j]);
+				this.vertexList[index].vv.mul_matrix(m);
+				index++;
+			}
+			
+			//配置情報を覚えておく
+			this.act_info[i].ry = -r_angle;
+		}	
+		baseVectors = [];	//もう使わない
+
+		//ポリゴン用頂点の描画順インデックスリストを作成
+		index = 0;
+
+		//Y軸中心(X-Z平面)の回転ループ	
+		for(let xz = 0;xz < r_n;++xz)
+		{
+			const firstpos = n * xz;	//各多角形の最初の頂点のインデックス
+
+			//X-Y平面での多角形頂点ループ
+			//
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+			// 表とします。
+			// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,C
+			// の場合、ABベクトルとACベクトルとの外積で計算します。
+			// 
+			// A----C 
+			// |  ／|
+	    	// |／  |
+			// B----D
+			//
+			// この法則に基づいて、もうひとつの△BCDの手前に
+			// 向ける頂点の描画順は、C,B,Dになります。
+			//
+			for(let xy = 0;xy < n;++xy)
+			{
+				//番号は4角形トーラスでのインデックス順
+				// n = 4 の場合
+				//
+				//   0+--+4  表: 0,1,4,4,1,5
+				//    |／|   
+				//   1+--+5  表: 1,2,5,5,1,2
+				//    |／|   
+				//   2+--+6  ：
+				//    |／|   ：
+				//   3+--+7  表: 3,0,7,7,0,4
+				//    |／|   
+				//   0+--+4
+				//   ↑
+				//   firstpos
+				//
+				this.polyIndexList[index++] =  firstpos +   xy;									//0
+				this.polyIndexList[index++] =  firstpos + ((xy + 1)  % n);						//1
+				this.polyIndexList[index++] = (firstpos +  (xy + n)          ) % totalVertex;	//4
+				this.polyIndexList[index++] = (firstpos +  (xy + n)          ) % totalVertex;	//4
+				this.polyIndexList[index++] =  firstpos + ((xy + 1)  % n);						//1
+				this.polyIndexList[index++] = (firstpos + ((xy + 1)  % n) + n) % totalVertex;	//5
+			}
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+	
+	//ねじれアクション
+	action()
+	{
+		const r_n = this.unit_round_num;
+			
+		//アクションを決める
+		if(!(this.act_cnt++ % 100))
+		{
+			for(let i = 0;i < r_n;++i)
+			{
+				const unitAngle      = rad(2);						//1回の回転角度
+				this.act_info[i].dir = rnd(2) * (-1 * rnd(2));		//-1,0,1 のどれか
+				this.act_info[i].a   = unitAngle * (rnd(2) + 1)		//回転角をランダムで2倍にする
+									   * this.act_info[i].dir;		//方向はdirで決まる
+			}
+		}
+		
+		//すべての断面の頂点を回転させる
+		const v_n = this.unit_vertex_num;
+		for(let i = 0;i < r_n;++i)
+		{
+			//いったんY軸での回転とX軸での平行移動を元に戻して、
+			//断面を中心に持ってきた後、Z軸回転して、再度平行
+			//移動と回転を掛ける行列を生成する
+			//
+			// 掛ける順番は、
+			// 負のY軸回転→負の平行移動→Z軸回転→正の平行移動→正のY軸回転
+			// となる。
+			//
+			let m        = new MatrixMan4();
+			let mRYplus  = new MatrixMan4();
+			let mRYminus = new MatrixMan4();
+			let mTXplus  = new MatrixMan4();
+			let mTXMinus = new MatrixMan4();
+			let mRZ      = new MatrixMan4();
+			const tx     = this.act_info[i].tx;
+			const ry     = this.act_info[i].ry;
+			
+			mRYplus.rotateY(ry);
+			mRYminus.rotateY(-ry);
+			mTXplus.translate(tx,0.0,0.0);
+			mTXMinus.translate(-tx,0.0,0.0);
+			
+			//60度以上回転してたら逆回転にする
+			if(Math.abs(this.act_info[i].r) >= Math.PI/3)
+			{
+				this.act_info[i].a   *= -1;
+				this.act_info[i].dir *= -1;
+			}
+			
+			mRZ.rotateZ(this.act_info[i].a);
+			this.act_info[i].r += this.act_info[i].a;
+			
+			//合成
+			m = m.mul(mRYminus);
+			m = m.mul(mTXMinus);
+			m = m.mul(mRZ);
+			m = m.mul(mTXplus);
+			m = m.mul(mRYplus);
+			
+			const first = i * this.unit_vertex_num;
+			for(let j = 0;j < v_n;++j)
+			{
+				//頂点座標に適用する
+				this.vertexList[first+j].vv.mul_matrix(m);
+			}
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+	}
+}
+
+//扇型トーラスオブジェクト管理人
+class FanTorusObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor(cvn,cr,ivn,ir,ia)
+	{
+		//初期化
+		super();
+		
+		//パラメータの意味
+		//cvn : カット面の分割頂点数 
+		//cr  : カット面の半径
+		//ivn : 扇形の分割頂点数
+		//ir  : 扇形中心の半径
+		//ia  : 扇形の角度
+		
+		ivn = 2;
+		ia  = 30;
+		cvn = 7;
+		
+		//頂点リストを生成
+		this.create(cvn,cr,ivn,ir,ia);
+	}
+
+	//オブジェクトの頂点リストを生成
+	create(cvn,cr,ivn,ir,ia)
+	{
+		//データ領域の確保
+		const totalVertex    = cvn * ivn;						//頂点の数
+		const totalPolygon   = cvn * (ivn-1) * 2 * 2;			//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		//
+		// cvn角形の各頂点座標をY軸を中心に上から見て角度iaをivn分割する形になる
+		// ように回転させて扇形トーラス図形を完成させます
+		// これは、基本となるcvn角形をX-Y平面で作成し、X方向にir分平行移動させた後、
+		// Y軸を中心にia度分回転させることで座標が計算できます
+		//
+
+		//cvn角形の基本座標を設定
+		let baseVectors = [];
+		const radius    = cr;						//cvn角形の半径
+		let   angle     = 0.0;						//cvn角形の角度
+		let   addAngle  = (Math.PI * 2.0 / cvn);	//cvn角形の角度増分値
+		for(let i = 0;i < cvn;++i,angle += addAngle)
+		{
+			baseVectors.push(new VectorMan4());
+			baseVectors[i].x = radius * Math.cos(angle);
+			baseVectors[i].y = radius * Math.sin(angle);
+			baseVectors[i].z = 0.0;
+		}
+
+		//基本図形をir分X方向に平行移動させるための
+		//平行移動行列を作成
+		let mMove = new MatrixMan4();
+		mMove.translate(ir,0.0,0.0);
+
+		//基本図形を平行移動させた後、Y軸を中心に回転させて
+		//トーラス図形の頂点座標を計算します
+		let index = 0;
+		addAngle  = (rad(ia) / ivn);	//扇形の角度増分値
+		angle     = 0.0;
+		for(let i = 0;i < ivn;++i,angle += addAngle)
+		{
+			//回転行列を作成
+			let mRotate = new MatrixMan4();
+			mRotate.rotateY(-angle);		//時計回り(右回り)に回す
+
+			//平行移動行列と合成
+			let m = new MatrixMan4();
+			m = m.mul(mMove);
+			m = m.mul(mRotate);
+
+			//基本図形を変換して座標を作成
+			for(let j = 0;j < cvn;++j)
+			{
+				this.vertexList[index].vv.copy(baseVectors[j]);
+				this.vertexList[index].vv.mul_matrix(m);
+				index++;
+			}
+		}	
+		baseVectors = [];	//もう使わない
+
+		//ポリゴン用頂点の描画順インデックスリストを作成
+		index = 0;
+		
+		//Y軸中心(X-Z平面)の回転ループ	
+		for(let xz = 0;xz < (ivn-1);++xz)
+		{
+			const firstpos = cvn * xz;	//各多角形の最初の頂点のインデックス
+
+			//X-Y平面での多角形頂点ループ
+			//
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+			// 表とします。
+			// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点A,B,Cの
+			// ABベクトルとACベクトルとの外積で計算します。
+			//
+			// A----C 
+			// |  ／|
+	    	// |／  |
+			// B----D
+			//
+			// この法則に基づいて、もうひとつの△BCDの手前に
+			// 向ける頂点の描画順は、C,B,Dになります。
+			//
+			// 今回は内向きの面も作るので、反対向きの法線を
+			// 持つポリゴンの頂点の描画順は、A,C,BとC,D,Bに
+			// なります。
+			// 
+			// 表：A,B,C,C,B,D
+			// 裏：A,C,B,C,D,B
+			//	
+			for(let xy = 0;xy < cvn;++xy)
+			{
+				// cvn = 4 の場合
+				// 今回は両面作るのでわかりやすい順番で並べました
+				//
+				//   0+--+4  表: 0,1,4,4,1,5
+				//    |／|   裏: 0,4,1,4,5,1
+				//   1+--+5  表: 1,2,5,5,1,2
+				//    |／|   裏: 1,5,2,5,6,2
+				//   2+--+6  ：
+				//    |／|   ：
+				//   3+--+7  表: 3,0,7,7,0,4
+				//    |／|   裏: 3,7,0,7,4,0
+				//   0+--+4
+				//   ↑
+				//   firstpos
+				//
+				this.polyIndexList[index++] = firstpos +   xy;						//0
+				this.polyIndexList[index++] = firstpos +  (xy + 1  ) % cvn;			//1
+				this.polyIndexList[index++] = firstpos +  (xy + cvn);				//4
+				this.polyIndexList[index++] = firstpos +  (xy + cvn);				//4
+				this.polyIndexList[index++] = firstpos +  (xy + 1  ) % cvn;			//1
+				this.polyIndexList[index++] = firstpos + ((xy + 1  ) % cvn) + cvn;	//5
+				
+				this.polyIndexList[index++] = firstpos +   xy;						//0
+				this.polyIndexList[index++] = firstpos +  (xy + cvn);				//4
+				this.polyIndexList[index++] = firstpos +  (xy + 1  ) % cvn;			//1
+				this.polyIndexList[index++] = firstpos +  (xy + cvn);				//4
+				this.polyIndexList[index++] = firstpos + ((xy + 1  ) % cvn) + cvn;	//5
+				this.polyIndexList[index++] = firstpos +  (xy + 1  ) % cvn;			//1
+			}
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//円柱オブジェクト管理人
+class CylinderObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create(DEF_CYLINDER_NUM);
+	}
+
+	//オブジェクトの頂点リストを生成
+	create(n)
+	{
+		//データ領域の確保
+		const totalVertex    = n * 2;							//頂点の数
+		const totalPolygon   = totalVertex * 2;					//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+
+		//
+		// X-Z平面上にn角形の頂点を配置し、それをY軸に沿って広げることで円柱
+		// オブジェクトを作成します。
+		//
+		
+		//n角形の基本座標を設定
+		const radius   = 0.4;					//n角形の半径
+		let   angle    = 0.0;					//n角形の角度
+		let   addAngle = (Math.PI * 2.0 / n);	//n角形の角度増分値
+		for(let i = 0;i < n;++i,angle += addAngle)
+		{
+			//Y軸回転は時計回り(右回り)になるようにします
+			this.vertexList[  i].vv.x = radius * Math.cos(-angle);	//上側のn角形
+			this.vertexList[  i].vv.z = radius * Math.sin(-angle);
+			this.vertexList[  i].vv.y =  0.5;
+			this.vertexList[n+i].vv.x = radius * Math.cos(-angle);	//下側のn角形
+			this.vertexList[n+i].vv.z = radius * Math.sin(-angle);
+			this.vertexList[n+i].vv.y = -0.5;
+		}
+
+		//ポリゴン用頂点の描画順インデックスリストを作成
+		let index = 0;
+
+		for(let i = 0;i < n;++i)
+		{
+			//X-Y平面での多角形頂点ループ
+			//
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+			// 表とします。
+			// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,C
+			// の場合、ABベクトルとACベクトルとの外積で計算します。
+			// 
+			// A----C 
+			// |  ／|
+	    	// |／  |
+			// B----D
+			//
+			// この法則に基づいて、もうひとつの△BCDの手前に
+			// 向ける頂点の描画順は、C,B,Dになります。
+			//
+			
+			//番号は4角柱でのインデックス順
+			// n = 4 の場合
+			//
+			//   0  1  2
+			//   +--+--+… 表: 0,4,1,1,4,5
+			//   |／|／|   裏: 0,1,4,1,5,4
+			//   +--+--+… 表: 1,5,2,2,5,6
+			//   4  5  6   表: 1,2,5,2,6,5
+			//
+			
+			//外向きポリゴンの作成
+			this.polyIndexList[index++] =   i;					//0
+			this.polyIndexList[index++] =   i + n;				//4
+			this.polyIndexList[index++] =   (i + 1) % n;		//1
+			this.polyIndexList[index++] =   (i + 1) % n;		//1
+			this.polyIndexList[index++] =   i + n;				//4
+			this.polyIndexList[index++] =  ((i + 1) % n) + n;	//5
+			
+			//内向きポリゴンの作成
+			this.polyIndexList[index++] =   i;					//0
+			this.polyIndexList[index++] =   (i + 1) % n;		//1
+			this.polyIndexList[index++] =   i + n;				//4
+			this.polyIndexList[index++] =   (i + 1) % n;		//1
+			this.polyIndexList[index++] =  ((i + 1) % n) + n;	//5
+			this.polyIndexList[index++] =   i + n;				//4
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//ｎ角錐オブジェクト管理人
+class PyramidObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create(DEF_PYRAMID_NUM);
+	}
+
+	//オブジェクトの頂点リストを生成
+	create(n)
+	{
+		//データ領域の確保
+		const totalVertex    = n + 2;							//頂点の数
+		const totalPolygon   = n * 2;							//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+	
+		//
+		//頂上の1点と底面の中心の1点を決め、X-Z平面上に配置した、
+		//n角形の頂点を頂上と底面の中心点とで結ぶことでポリゴンを
+		//成形します。
+		//計算のしやすさを考慮して、頂上と中心の点は後ろに持って
+		//いきます。
+		//
+		
+		//n角形の頂点座標を設定
+		const radius   = 0.5;					//n角形の半径
+		let   angle    = 0.0;					//n角形の角度
+		let   addAngle = (Math.PI * 2.0 / n);	//n角形の角度増分値
+		for(let i = 0;i < n;++i,angle += addAngle)
+		{
+			//Y軸回転は反時計回り(左回り)になるようにします
+			this.vertexList[i].vv.x = radius * Math.cos(angle);
+			this.vertexList[i].vv.z = radius * Math.sin(angle);
+			this.vertexList[i].vv.y = 0.0;
+		}
+		
+		//頂上と底面の中心点の頂点座標を設定します
+		this.vertexList[n  ].vv.x = 0.0;
+		this.vertexList[n  ].vv.y = radius;
+		this.vertexList[n  ].vv.z = 0.0;
+		this.vertexList[n+1].vv.x = 0.0;
+		this.vertexList[n+1].vv.y = 0.0;
+		this.vertexList[n+1].vv.z = 0.0;
+				
+		//ポリゴン用頂点の描画順インデックスリストを作成
+		let index = 0;
+		
+		for(let i = 0;i < n;++i)
+		{
+			//斜面のポリゴン頂点ループ
+			//
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+			// 表とします。
+			// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,C
+			// の場合、ABベクトルとACベクトルとの外積で計算します。
+			// 
+			//      A 
+			//    ／|＼
+	    	//  ／  |  ＼
+			// B----C----D
+			//
+			// この法則に基づいて、Aを頂上とする斜面のポリゴンの頂点順は
+			// A,B,C A,C,D 
+			// となります。
+			//
+			// 番号は四角錐でのインデックス順
+			//   n = 4 の場合
+			//
+			//      n  (n+1は底面の中心)
+			//      +      
+			//    ／|＼    表：n,0,1,n,1,2
+			//   +--+--+… 底：n+1,1,0,n+1,2,1
+			//   0  1  2   
+			//
+			
+			//斜面ポリゴンの作成
+			this.polyIndexList[index + 0] =  n;				//n
+			this.polyIndexList[index + 1] =  i;				//0
+			this.polyIndexList[index + 2] = (i + 1) % n;	//1
+			
+			//底面ポリゴンの作成
+			const o = DEF_VERTEX_NUM_FOR_PRIMITIVE * n;
+			this.polyIndexList[index+o+0] =  n+1;			//n+1
+			this.polyIndexList[index+o+1] = (i + 1) % n;	//1
+			this.polyIndexList[index+o+2] =  i;				//0
+			
+			index += DEF_VERTEX_NUM_FOR_PRIMITIVE;
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+//球体オブジェクト管理人
+class SphereObjMan extends Obj3dManBase
+{
+	//コンストラクタ
+	constructor()
+	{
+		//初期化
+		super();
+		
+		//頂点リストを生成
+		this.create(DEF_SPHERE_NUM);
+	}
+
+	//オブジェクトの頂点リストを生成
+	create(n)
+	{
+		//データ領域の確保
+		//nは半球の分割数
+		const totalVertex    = (n * 2) * (n - 1) + 2;			//頂点の数
+		const totalPolygon   = (n * 2) * 2 + (n * 4) * (n - 2);	//ポリゴンの数
+		const totalPolyIndex = totalPolygon *					//頂点インデックス
+							   this.vertexNumForPrimitive;		//情報の総数
+		this.vertexList = [];
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.vertexList.push(new VertexMan());
+		}
+		this.polyIndexList = new Int16Array(totalPolyIndex);
+		this.vertexNum     = totalVertex;
+		this.primitiveNum  = totalPolygon;
+	
+		//
+		//頂上の1点と底面の中心の1点を決め、X-Z平面上に配置した、
+		//n角形の頂点を頂上と底面の中心点とで結ぶことでポリゴンを
+		//成形します。
+		//計算のしやすさを考慮して、頂上と中心の点は後ろに持って
+		//いきます。
+		//
+		
+		//n角形の頂点座標を設定
+		const radius   = 0.5;					//n角形の半径
+		let   angle    = 0.0;					//n角形の角度
+		let   addAngle = (Math.PI / n);			//n角形の角度増分値
+		let   v        = new VectorMan4();
+		let   vv       = new VectorMan4();
+		let   my       = new MatrixMan4();
+		let   mz       = new MatrixMan4();
+		let   m        = new MatrixMan4();
+		let   index    = 0;
+		for(let i = 0;i < (n * 2);++i)
+		{
+			//XZ平面での基準とする座標をセット
+			v.setValue(radius,0.0,0.0,1.0);
+			
+			//Y軸での回転
+			my.rotateY(addAngle * i);
+			
+			for(let j = 1;j < n;++j)
+			{
+				//基準となる点をZ軸とY軸で回転させて、
+				//球を縦に切った上からの順番になるようにする
+				
+				//Z軸回転で上から下に降りる回転を設定
+				mz.rotateZ(rad(90)-addAngle * j);
+				
+				//回転の変換行列を合成
+				m.initialize();
+				m.mul(mz);
+				m.mul(my);
+				
+				//基準座標に回転を適用
+				vv.copy(v);
+				vv.mul_matrix(m);
+				
+				this.vertexList[index++].vv.copy(vv);
+			}
+			angle += addAngle;
+		}
+		
+		//上下の中心点を追加
+		this.vertexList[index++].vv.setValue(0.0, radius,0.0,1.0);
+		this.vertexList[index++].vv.setValue(0.0,-radius,0.0,1.0);
+
+		//ポリゴン用頂点の描画順インデックスリストを作成
+		index = 0;
+		const a = (n * 2) * (n - 1);
+		
+		for(let i = 0;i < (n * 2);++i)
+		{
+			//斜面のポリゴン頂点ループ
+			//
+			// ポリゴンの表面が外側を向くように、以下の説明の要領で頂点の描画順を設定
+			//
+			// ポリゴンの表面の方向は、OpenGL系に合わせて反時計回り(左回り)を
+			// 表とします。
+			// 面の向きは法線ベクトルの向きで表し、法線ベクトルは頂点順がA,B,E
+			// の場合、ABベクトルとAEベクトルとの外積で計算します。
+			// 
+			//      A 
+			//    ／|＼
+	    	//  ／  |  ＼
+			// B----E----G
+			// |  ／|  ／|
+			// |／  |／  |
+			// C----F----H
+			//  ＼  |  ／
+			//    ＼|／
+			//      D
+			//
+			// この法則に基づいて、斜面のポリゴンの頂点順は
+			// A,B,E 
+			// B,C,E E,C,F
+			// C,D,F
+			// …
+			// となります。
+			//
+			// 番号は n = 4 の場合でのインデックス順
+			//
+			//      a      a = (n * 2) * (n - 1)
+			//      +      
+			//    ／|＼     a,0,3 0,1,3 3,1,4 1,2,4 4,2,5 2,a+1,5
+			//   0--3--6…  a,3,6 3,4,6 6,4,7 4,5,7 7,5,8 5,a+1,8
+			//   |／|／|   
+			//   1--4--7…
+			//   |／|／|   
+			//   2--5--8…
+			//    ＼|／
+			//     a+1 
+			//
+			
+			for(let j = 0;j < (n - 1);++j)
+			{
+				//斜面ポリゴンの作成
+				const first = (n - 1) * i;
+				const num   = (n - 1) * (n * 2);
+				
+				if(j == 0)
+				{
+					//上のフタ
+					this.polyIndexList[index++] =  a;						//a
+					this.polyIndexList[index++] =  first;					//0
+					this.polyIndexList[index++] = (first + n - 1) % num;	//3
+				}
+				
+				if(j == (n - 2))
+				{
+					//下のフタ
+					this.polyIndexList[index++] =  first + j;				//2
+					this.polyIndexList[index++] =  a+1;						//a+1
+					this.polyIndexList[index++] = (first+j + n-1) % num;	//5
+				}
+				else
+				{
+					//中間
+					this.polyIndexList[index++] =  first + j;				//0
+					this.polyIndexList[index++] =  first + j + 1;			//1
+					this.polyIndexList[index++] = (first+j + n-1) % num;	//3
+					
+					this.polyIndexList[index++] = (first+j + n-1) % num;	//3
+					this.polyIndexList[index++] =  first + j + 1;			//1
+					this.polyIndexList[index++] = (first+j + n-1 +1) % num;	//4
+				}
+			}
+		}
+		
+		//頂点バッファに流し込むための配列を生成しておく
+		this.polyVertexList = new Float32Array(totalVertex * 4);
+		for(let i = 0;i < totalVertex;++i)
+		{
+			this.polyVertexList[i * 4 + 0] = this.vertexList[i].vv.x;
+			this.polyVertexList[i * 4 + 1] = this.vertexList[i].vv.y;
+			this.polyVertexList[i * 4 + 2] = this.vertexList[i].vv.z;
+			this.polyVertexList[i * 4 + 3] = this.vertexList[i].vv.w;
+		}
+		
+		//TODO ★★★頂点インデックスに対応した境界線描画用のUV座標リストを作成
+	}
+}
+
+const NEAR_Z_POS            = 10;			//描画許可するZ方向の最小値
+const FAR_Z_POS             = 1000;			//描画許可するZ方向の最大値
+const INVALID_Z_VALUE       = 10000.0;		//無効なZ値
+const DEFAULT_AMBIENT_LIGHT = 0.2;			//デフォルトの環境光の値(R/G/B共通)
+const DEFAULT_DEFUSE_LIGHT  = 0.7;			//デフォルトの拡散光の値(R/G/B共通)
+const DEFAULT_LIGHT_X       = 1.0;			//デフォルトの光源ベクトルのX方向
+const DEFAULT_LIGHT_Y       = 1.0;			//デフォルトの光源ベクトルのY方向
+const DEFAULT_LIGHT_Z       = -1.0;			//デフォルトの光源ベクトルのZ方向
+											//↑座標じゃないよベクトル(方向)だよ
+											//  光源の向いている方向だよ(右手座標系用)
+
+class RenderingMan
+{
+	//コンストラクタ
+	constructor(screen,offscreen,algo_label)
+	{
+		//初期化
+		this.sc             = screen;
+		this.sc_w           = screen.width;
+		this.sc_h           = screen.height;
+		this.sc_ctx         = screen.getContext("2d");
+		this.offsc          = offscreen;
+		this.algo           = algo_label;
+		
+		this.mtx_model      = new MatrixMan4();
+		this.mtx_view       = new MatrixMan4();
+		this.mtx_projection = new MatrixMan4();
+		this.mtx_viewport   = new MatrixMan4();
+		this.mtx_mvp        = new MatrixMan4();
+		
+		//TODO ★視線ベクトルはView変換行列から作成する？
+		this.vEye           = new VectorMan3(0,0,-1);					//Z-を向いてる視線ベクトル(右手座標系用)
+		this.vLight         = new VectorMan3(DEFAULT_LIGHT_X,			//光源方向ベクトル
+						  					 DEFAULT_LIGHT_Y,
+						  					 DEFAULT_LIGHT_Z);
+		this.vAmbientColor  = new VectorMan3(DEFAULT_AMBIENT_LIGHT,		//環境光色
+											 DEFAULT_AMBIENT_LIGHT,
+											 DEFAULT_AMBIENT_LIGHT);
+		this.vDiffuseColor = new VectorMan3(DEFAULT_DEFUSE_LIGHT,		//拡散光色
+											DEFAULT_DEFUSE_LIGHT,
+											DEFAULT_DEFUSE_LIGHT);
+											
+		//ポリゴンの法線ベクトルを計算するためのワーク
+		this.nv_n = new VectorMan3();
+		this.nv_a = new VectorMan3();
+		this.nv_b = new VectorMan3();
+		
+		//MVP変換をするためのワーク
+		this.mvp_vertex_list = [];
+		for(let i = 0; i < 64;++i)
+		{	this.mvp_vertex_list.push(new VertexMan());	}
+		
+		//ViewPort変換をかけるためのワーク
+		this.vpt_vertex1 = new VectorMan4();
+		this.vpt_vertex2 = new VectorMan4();
+		this.vpt_vertex3 = new VectorMan4();
+		
+		//EdgeFunctonの対象ピクセル座標のワーク
+		this.target_p = new VectorMan4();
+		
+		//Zバッファ
+		this.aZBuffer = new Float32Array(this.sc_w * this.sc_h);	//Float32Arrayにした方が速い
+		
+		//レンダリング方法を初期化
+		this.setupFlatShading();
+	}
+	
+	//環境光色をセット
+	setAmbientLightColor(r,g,b)
+	{
+		this.vAmbientColor  = new VectorMan3(r,g,b);
+	}
+	
+	//拡散光色をセット
+	setDefuseLightColor(r,g,b)
+	{
+		this.vDiffuseColor  = new VectorMan3(r,g,b);
+	}
+	
+	//CanvasのLINE描画で準備する
+	setupContextLine()
+	{
+		this.funcDrawBegin     = this.drawBegin_context_line;
+		this.funcDrawEnd       = this.drawEnd_context_line;
+		this.funcDrawLine      = this.drawLine_context_line;
+		this.funcDrawPrimitive = this.drawPolygonWithWireframe;
+		
+		this.algo.innerText = "context.lineTo";
+	}
+	
+	//CanvasのLINE描画前処理
+	drawBegin_context_line(ctx,sc_w,sc_h)
+	{
+		//画面クリア
+		ctx.clearRect(0,0,sc_w,sc_h);
+		
+		//ワイヤーの色を決める
+		ctx.strokeStyle = 'lime';
+		
+		//描画登録開始指示
+		ctx.beginPath();
+	}
+	
+	//CanvasのLINE描画後処理
+	drawEnd_context_line(ctx,sc_w,sc_h)
+	{
+		//描画実施指示
+		ctx.stroke();
+	}
+	
+	//CanvasのLINE描画処理
+	drawLine_context_line(ctx,sc_w,sc_h,x1,y1,x2,y2)
+	{
+		//LINE描画
+		ctx.moveTo(x1,y1);
+		ctx.lineTo(x2,y2);
+	}
+	
+	//ブレゼンハムのLINE描画で準備する
+	setupBresenhamLine()
+	{
+		this.funcDrawBegin     = this.drawBegin_bresenham;
+		this.funcDrawEnd       = this.drawEnd_bresenham;
+		this.funcDrawLine      = this.drawLine_bresenham;
+		this.funcDrawPrimitive = this.drawPolygonWithWireframe;
+		
+		this.algo.innerText = "bresenham line";
+	}
+	
+	//ブレゼンハムのLINE描画前処理
+	drawBegin_bresenham(ctx,sc_w,sc_h)
+	{
+		//高速にクリア
+		let data = this.offsc.data;	//いったんローカル変数に参照を移す
+		data.fill(0);				//0埋めするならforで回すより速い
+		
+		//ワイヤーの色を決める
+		this.line_color = { r: 0, g: 255, b: 0, a: 255 };
+	}
+	
+	//ブレゼンハムのLINE描画後処理
+	drawEnd_bresenham(ctx,sc_w,sc_h)
+	{
+		//オフスクリーンを転送
+		ctx.putImageData(this.offsc,0,0);
+	}
+	
+	//ブレゼンハムのLINE描画処理
+	drawLine_bresenham(ctx,sc_w,sc_h,x1,y1,x2,y2)
+	{
+		//整数化(重要！　これをやらないとImageDataへの書き込みで失敗する)
+		x1 = Math.floor(x1);
+		y1 = Math.floor(y1);
+		x2 = Math.floor(x2);
+		y2 = Math.floor(y2);
+		
+		//パラメータ準備
+		let dx   = Math.abs(x2 - x1);
+		let dy   = Math.abs(y2 - y1);
+		let addX = (x1 < x2) ? 1 : -1;
+		let addY = (y1 < y2) ? 1 : -1;
+
+		//クリッピング
+		if(((x1 < 0) && (x2 < 0)) || ((x1 >= sc_w) && (x2 >= sc_w)) ||
+		   ((y1 < 0) && (y2 < 0)) || ((y1 >= sc_h) && (y2 >= sc_h)))
+		{	return;	}
+		
+		if(dx > dy)
+		{
+			//Xでループ
+			let diff = Math.floor(dy - dx / 2);
+
+			while(x1 != x2)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+
+				//座標更新
+				x1 += addX;
+				if(diff >= 0)
+				{
+					y1   += addY;
+					diff -= dx;
+				}
+				diff += dy;
+			}
+		}
+		else
+		{
+			//Yでループ
+			let diff = Math.floor(dx - dy / 2);
+
+			while(y1 != y2)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+
+				//座標更新
+				y1 += addY;
+				if(diff >= 0)
+				{
+					x1   += addX;
+					diff -= dy;
+				}
+				diff += dx;
+			}
+		}
+
+		//終点を描画
+		this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+	}
+	
+	//ブレゼンハムLINE描画用の点描画
+	drawPoint_bresenham(sc_w,sc_h,x,y,color)
+	{
+		//クリッピングして描画
+		if((x >= 0) && (x < sc_w) && (y >= 0) && (y < sc_h))
+		{
+			const pos = (sc_w << 2) * y + (x << 2);		// = (sc_w * 4) * y + (x * 4)
+			this.offsc.data[pos + 0] = color.r;
+			this.offsc.data[pos + 1] = color.g;
+			this.offsc.data[pos + 2] = color.b;
+			this.offsc.data[pos + 3] = color.a;
+		}
+	}
+	
+	//ダブルステップブレゼンハムのLINE描画で準備する
+	setupDoubleStepBresenhamLine()
+	{
+		this.funcDrawBegin     = this.drawBegin_bresenham;
+		this.funcDrawEnd       = this.drawEnd_bresenham;
+		this.funcDrawLine      = this.drawLine_doublestep_bresenham;
+		this.funcDrawPrimitive = this.drawPolygonWithWireframe;
+		
+		this.algo.innerText = "double-step bresenham line";
+	}
+	
+	//ダブルステップブレゼンハムのLINE描画処理
+	drawLine_doublestep_bresenham(ctx,sc_w,sc_h,x1,y1,x2,y2)
+	{
+		//整数化(重要！　これをやらないとImageDataへの書き込みで失敗する)
+		x1 = Math.floor(x1);
+		y1 = Math.floor(y1);
+		x2 = Math.floor(x2);
+		y2 = Math.floor(y2);
+		
+		//パラメータ準備
+		let dx   = Math.abs(x2 - x1);
+		let dy   = Math.abs(y2 - y1);
+		let addX = (x1 < x2) ? 1 : -1;
+		let addY = (y1 < y2) ? 1 : -1;
+		let e,n,nn; //eは蓄積誤差値
+		
+		//クリッピング
+		if(((x1 < 0) && (x2 < 0)) || ((x1 >= sc_w) && (x2 >= sc_w)) ||
+		   ((y1 < 0) && (y2 < 0)) || ((y1 >= sc_h) && (y2 >= sc_h)))
+		{	return;	}
+		
+		//完全な横線のとき
+		if(dy == 0)
+		{
+			//両端から進むのでループは差分の半分
+			n = dx >> 1;	//n = dx / 2;
+			
+			//描画ループ
+			for(let i = 0;i <= n;++i)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+				this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+				
+				//描画位置を更新
+				x1 += addX;
+				x2 -= addX;
+			}
+		
+			//描画量が奇数の場合は最後の１ピクセルを描画する
+			if((dx & 0x01) == 0)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1 - addX,y1,this.line_color);
+			}
+		}
+		//完全な縦線のとき
+		else if(dx == 0)
+		{
+			//両端から進むのでループは差分の半分
+			n = dy >> 1;	//n = dy / 2;
+			
+			//描画ループ
+			for(let i = 0;i <= n;++i)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+				this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+
+				//描画位置を更新
+				y1 += addY;
+				y2 -= addY;
+			}
+		
+			//描画量が奇数の場合は最後の１ピクセルを描画する
+			if((dy & 0x01) == 0)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1 - addY,this.line_color);
+			}
+		}
+		else if(dx >= dy) 
+		{
+			//Ｘについてループする場合
+
+			//誤差値を初期化
+			e = -dx;
+
+			//ループ回数の算出
+			n = (dx + 1) >> 2;	//n = (dx + 1) / 4;
+
+			//m ＜ 1/2の場合 m = |x2 - x1| / |y2 - y1|
+			if((dy << 2) < (dx << 1))
+			{
+				for(let i = 0;i < n;++i)
+				{
+					//誤差値を更新
+					e += (dy << 2);	//e += 4dy;
+					
+					if(e < 0)
+					{
+						//●●○
+
+						//２ピクセル同時に点を描画
+						this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2,this.line_color);
+						
+						//描画位置の更新
+						x1 += (addX << 1);	//x1 += 2addX;
+						x2 -= (addX << 1);	//x2 -= 2addX;
+					}
+					else
+					{
+						if(e < (dy << 1))	//if(e < 2dy)
+						{
+							//　　○
+							//●●
+
+							//２ピクセル同時に点を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2,this.line_color);
+							
+							//描画位置を更新
+							x1 += (addX << 1);	//x1 += 2addX;
+							x2 -= (addX << 1);	//x2 -= 2addX;
+							y1 += addY;
+							y2 -= addY;
+							
+							//誤差値を更新
+							e -= (dx << 1);		//e -= 2dx;
+						}
+						else
+						{
+							//　●○
+							//●
+
+							//２ピクセル同時に描画
+
+							//１ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+							
+							//描画位置の更新
+							y1 += addY;
+							y2 -= addY;
+							
+							//２ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2,this.line_color);
+
+							//描画位置を更新
+							x1 += (addX << 1);	//x1 += 2addX; 
+							x2 -= (addX << 1);	//x2 -= 2addX;
+								
+							//誤差値を更新
+							e -= (dx << 1);		//e -= 2dx;
+						}
+					}
+				}
+			}
+			// 1/2 ≦ m ≦ 1の場合 m = |y2 - y1| / |x2 - x1|
+			else
+			{
+				for(let i = 0;i < n;++i)
+				{
+					//誤差値を更新
+					e += ((dy << 2) - (dx << 1));	//e += 4dy - 2dx;
+					
+					if(e >= 0)
+					{	
+						//　　○
+						//　●
+						//●
+
+						//２ピクセル同時に描画
+						this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1 + addY,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2 - addY,this.line_color);
+
+						//描画位置を更新
+						x1 += (addX << 1);	//x1 += 2addX;
+						x2 -= (addX << 1);	//x2 -= 2addX;
+						y1 += (addY << 1);	//y1 += 2addY;
+						y2 -= (addY << 1);	//y2 -= 2addY;
+						
+						//誤差値を更新
+						e -= (dx << 1);		//e -= 2dx;
+					}
+					else
+					{
+						if(e < ((dy << 1) - (dx << 1)))	//if(e < 2dy - 2dx)
+						{
+							//　　○
+							//●●
+
+							//２ピクセル同時に描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2,this.line_color);
+
+							//描画位置を更新
+							x1 += (addX << 1);	//x1 += 2addX;
+							x2 -= (addX << 1);	//x2 -= 2addX;
+							y1 += addY;
+							y2 -= addY;
+						}
+						else
+						{
+							//　●○
+							//●
+
+							//２ピクセル同時に描画
+							
+							//１ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+
+							//描画位置を更新
+							y1 += addY;
+							y2 -= addY;
+							
+							//２ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2,this.line_color);
+
+							//描画位置を更新
+							x1 += (addX << 1);	//x1 += 2addX;
+							x2 -= (addX << 1);	//x2 -= 2addX;
+						}
+					}
+				}
+			}
+
+			// ４ピクセル未満の端数分を描画
+			
+			//ループ回数を算出
+			n = ((dx + 1) % 4);
+			
+			for(let i = 0;i < n;++i)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+				
+				//描画位置を更新
+				x1 += addX;
+				
+				//誤差値を更新
+				e += (dy << 1);		//e += 2dy;
+
+				if(e >= 0)
+				{
+					//描画位置を更新
+					y1 += addY;
+
+					//誤差値を更新
+					e -= (dx << 1);		//e -= 2dx;
+				}
+			}
+		}
+		else
+		{
+			//Ｙについてループ
+
+			//誤差値を初期化
+			e = -dy;
+
+			//ループ回数を算出
+			n = (dy + 1) >> 2;	//n = (dy + 1) / 4;
+
+			//m ＜ 1/2の場合 m = |y2 - y1| / |x2 - x1|
+			if(dy >= (dx << 1))
+			{
+				for(let i = 0; i < n;++i)
+				{
+					//誤差値を更新
+					e += (dx << 2);	//e += 4dx;
+					
+					if(e < 0)
+					{
+						//○
+						//●
+						//● 
+						
+						//２ピクセル同時に描画
+						this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x1,y1 + addY,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2,y2 - addY,this.line_color);
+						
+						//描画位置を更新
+						y1 += (addY << 1);	//y1 += 2addY;
+						y2 -= (addY << 1);	//y2 -= 2addY;
+					}
+					else
+					{
+						if(e < (dx << 1))	//if(e < 2dx)
+						{
+							//　○
+							//●
+							//●
+
+							//２ピクセル同時に描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1 + addY,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2 - addY,this.line_color);
+
+							//描画位置を更新
+							y1 += (addY << 1);	//y1 += 2addY;
+							y2 -= (addY << 1);	//y2 -= 2addY;
+							x1 += addX;
+							x2 -= addX;
+							
+							//誤差値を更新
+							e -= (dy << 1);		//e -= 2dy;
+						}
+						else
+						{
+							//　○
+							//　●
+							//●
+
+							//２ピクセル同時に描画
+
+							//１ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+							
+							//描画位置を更新
+							x1 += addX;
+							x2 -= addX;
+							
+							//２ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1 + addY,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2 - addY,this.line_color);
+							
+							//描画位置を更新
+							y1 += (addY << 1);	//y1 += 2addY;
+							y2 -= (addY << 1);	//y2 -= 2addY;
+							
+							//誤差値を更新
+							e -= (dy << 1);		//e -= 2dy;
+						}
+					}
+				}
+			}
+			// 1/2 ≦ m ≦ 1の場合 m = |y2 - y1| / |x2 - x1|
+			else
+			{
+				for(let i = 0;i < n;++i)
+				{
+					//誤差値の更新
+					e += (dx << 2) - (dy << 1);		//e += (4dx - 2dy);
+					
+					if(e >= 0)
+					{
+						//　　○
+						//　●
+						//●
+
+						//２ピクセル同時に描画
+						this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x1 + addX,y1 + addY,this.line_color);
+						this.drawPoint_bresenham(sc_w,sc_h,x2 - addX,y2 - addY,this.line_color);
+						
+						//描画位置の更新
+						x1 += (addX << 1);	//x1 += 2addX;
+						x2 -= (addX << 1);	//x2 -= 2addX;
+						y1 += (addY << 1);	//y1 += 2addY;
+						y2 -= (addY << 1);	//y2 -= 2addY;
+						
+						//誤差値の更新
+						e -= (dy << 1);		//e -= 2dy;
+					}
+					else
+					{
+						if(((dx << 1) - (dy << 1)) > e)	//if((2dx - 2dy) > e)
+						{
+							//　○
+							//●　
+							//●
+
+							//２ピクセル同時に描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1 + addY,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2 - addY,this.line_color);
+
+							//描画位置を更新
+							y1 += (addY << 1);	//y1 += 2addY;
+							y2 -= (addY << 1);	//y2 -= 2addY;
+							x1 += addX;
+							x2 -= addX;
+						}
+						else
+						{
+							//　○
+							//　●
+							//●
+
+							//２ピクセル同時に描画
+
+							//１ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+
+							//描画位置を更新
+							x1 += addX;
+							x2 -= addX;
+							
+							//２ピクセル目を描画
+							this.drawPoint_bresenham(sc_w,sc_h,x1,y1 + addY,this.line_color);
+							this.drawPoint_bresenham(sc_w,sc_h,x2,y2 - addY,this.line_color);
+							
+							//描画位置を更新
+							y1 += (addY << 1);	//y1 += 2addY;
+							y2 -= (addY << 1);	//y2 -= 2addY;
+						}
+					}
+				}
+			}
+
+			// ４ピクセル未満の端数分を描画 
+			
+			//ループ回数を算出
+			n = ((dy + 1) % 4);
+
+			for(let i = 0;i < n;++i)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+				
+				//描画位置を更新
+				y1 += addY;
+
+				//誤差値を更新
+				e += (dx << 1);		//e += 2dx;
+			
+				if(e >= 0)
+				{
+					//描画位置を更新
+					x1 += addX;
+
+					//誤差値を更新
+					e -= (dy << 1);	//e -= 2dy;
+				}
+			}
+		}
+	}
+	
+	//アンチエイリアス付きブレゼンハムのLINE描画で準備する
+	setupBresenhamLineAA()
+	{
+		this.funcDrawBegin = this.drawBegin_bresenham;
+		this.funcDrawEnd   = this.drawEnd_bresenham;
+		this.funcDrawLine  = this.drawLine_bresenham_aa;
+		
+		this.algo.innerText = "bresenham antialiased-line";
+	}
+	
+	getPixelColor(sc_w,sc_h,x,y)
+	{
+		//指定の座標の色を取得
+		
+		let color = { r:0, g:0, b:0, a:0 };
+		if((x >= 0) && (x < sc_w) && (y >= 0) && (y < sc_h))
+		{
+			const pos = (sc_w << 2) * y + (x << 2);		// = (sc_w * 4) * y + (x * 4)
+			color.r = this.offsc.data[pos + 0];
+			color.g = this.offsc.data[pos + 1];
+			color.b = this.offsc.data[pos + 2];
+			color.a = this.offsc.data[pos + 3];
+		}
+		
+		return color;
+	}
+
+	calcAlphaBrendColor(dst_color,src_color,alpha)
+	{
+		//αブレンディング処理した色を計算
+		//
+		// dst_color	描画先にある色
+		// src_color	描画色
+		// alpha		α値（固定小数の小数部16bit)
+		//
+		
+		//描画先にある色を(1 - α)、描画色をαでブレンド
+		let color = { r:0, g:0, b:0, a:255 };
+		
+		//
+		// color = (dst * (1 - a)) + (src * a)
+		//       = dst - dst * a + src * a
+		//       = dst + src * a - dst * a
+		//       = dst + (src - dst) * a
+		//
+		
+		color.r = dst_color.r + (((src_color.r - dst_color.r) * alpha) >> 16);
+		color.g = dst_color.g + (((src_color.g - dst_color.g) * alpha) >> 16);
+		color.b = dst_color.b + (((src_color.b - dst_color.b) * alpha) >> 16);
+
+		return color;
+	}
+
+	//アンチエイリアス付きブレゼンハムのLINE描画処理
+	drawLine_bresenham_aa(ctx,sc_w,sc_h,x1,y1,x2,y2)
+	{
+		//整数化(重要！　これをやらないとImageDataへの書き込みで失敗する)
+		x1 = Math.floor(x1);
+		y1 = Math.floor(y1);
+		x2 = Math.floor(x2);
+		y2 = Math.floor(y2);
+		
+		//パラメータ準備
+		const dx   = Math.abs(x2 - x1);
+		const dy   = Math.abs(y2 - y1);
+		const addX = (x1 < x2) ? 1 : -1;
+		const addY = (y1 < y2) ? 1 : -1;
+		let x,y,alpha;
+		let alpha_color = { r: this.line_color.r, g: this.line_color.g, b: this.line_color.b, a: 0 };
+		
+		//クリッピング
+		if(((x1 < 0) && (x2 < 0)) || ((x1 >= sc_w) && (x2 >= sc_w)) ||
+		   ((y1 < 0) && (y2 < 0)) || ((y1 >= sc_h) && (y2 >= sc_h)))
+		{	return;	}
+		
+		//完全な横線のとき
+		if(dy == 0)
+		{
+			//両端から進むのでループは差分の半分
+			const n = dx >> 1;	//n = dx / 2;
+			
+			//描画ループ
+			for(let i = 0;i <= n;++i)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+				this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+				
+				//描画位置を更新
+				x1 += addX;
+				x2 -= addX;
+			}
+		
+			//描画量が奇数の場合は最後の１ピクセルを描画する
+			if((dx & 0x01) == 0)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1 - addX,y1,this.line_color);
+			}
+		}
+		//完全な縦線のとき
+		else if(dx == 0)
+		{
+			//両端から進むのでループは差分の半分
+			const n = dy >> 1;	//n = dy / 2;
+			
+			//描画ループ
+			for(let i = 0;i <= n;++i)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1,this.line_color);
+				this.drawPoint_bresenham(sc_w,sc_h,x2,y2,this.line_color);
+
+				//描画位置を更新
+				y1 += addY;
+				y2 -= addY;
+			}
+		
+			//描画量が奇数の場合は最後の１ピクセルを描画する
+			if((dy & 0x01) == 0)
+			{
+				//点を描画
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y1 - addY,this.line_color);
+			}
+		}
+		else if(dx > dy)
+		{
+			//Xでループ
+			
+			//Y座標だけ固定小数化
+			y1 = y1 << 16;
+			y2 = y2 << 16;
+			
+			//固定小数の誤差値を算出
+			let e = (y2 - y1) / dx;
+
+			while(x1 != x2)
+			{
+				//α値を取得
+				alpha = (y1 & 0xFFFF);
+				
+				//Y座標を整数にする
+				y = y1 >> 16;
+
+				//ライン部を描画
+				const color_line = this.calcAlphaBrendColor(this.getPixelColor(sc_w,sc_h,x1,y),this.line_color,0x10000-alpha);
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y,color_line);
+
+				//アンチエイリアス部を描画
+				const color_anti = this.calcAlphaBrendColor(this.getPixelColor(sc_w,sc_h,x1,y+1),this.line_color,alpha);
+				this.drawPoint_bresenham(sc_w,sc_h,x1,y+1,color_anti);
+
+				//座標更新
+				x1 += addX;
+				y1 += e;
+			}
+			
+			//終点を描画
+			this.drawPoint_bresenham(sc_w,sc_h,x2,(y2 >> 16),this.line_color);
+		}
+		else
+		{
+			//Yでループ
+			
+			//X座標だけ固定小数化
+			x1 = x1 << 16;
+			x2 = x2 << 16;
+			
+			//固定小数の誤差値を算出
+			let e = (x2 - x1) / dy;
+
+			while(y1 != y2)
+			{
+				//α値を取得
+				alpha = (x1 & 0xFFFF);
+				
+				//X座標を整数にする
+				x = x1 >> 16;
+				
+				//ライン部を描画
+				const color_line = this.calcAlphaBrendColor(this.getPixelColor(sc_w,sc_h,x,y1),this.line_color,0x10000-alpha);
+				this.drawPoint_bresenham(sc_w,sc_h,x,y1,color_line);
+
+				//アンチエイリアス部を描画
+				const color_anti = this.calcAlphaBrendColor(this.getPixelColor(sc_w,sc_h,x+1,y1),this.line_color,alpha);
+				this.drawPoint_bresenham(sc_w,sc_h,x+1,y1,color_anti);
+
+				//座標更新
+				x1 += e;
+				y1 += addY;
+			}
+			
+			//終点を描画
+			this.drawPoint_bresenham(sc_w,sc_h,(x2 >> 16),y2,this.line_color);
+		}
+	}	
+	//フラットシェーディングで準備する
+	setupFlatShading()
+	{
+		this.funcDrawBegin     = this.drawBegin_flatshading;
+		this.funcDrawEnd       = this.drawEnd_bresenham;
+		this.funcDrawLine      = this.drawLine_bresenham;
+		this.funcDrawPrimitive = this.drawPolygonWithFlatShading;
+		
+		this.algo.innerText = "Flat Shading";
+	}
+	
+	//フラットシェーディング描画前処理
+	drawBegin_flatshading(ctx,sc_w,sc_h)
+	{
+		//高速にクリア
+		let data = this.offsc.data;	//いったんローカル変数に参照を移す
+		data.fill(0);				//0埋めするならforで回すより速い
+		
+		//Zバッファクリア
+		this.aZBuffer.fill(INVALID_Z_VALUE);
+	}
+	
+	
+	//モデル変換行列をセット
+	setModelMatrix(m)
+	{
+		this.mtx_model.copy(m);
+	}
+	
+	//ビュー変換行列をセット
+	setViewMatrix(m)
+	{
+		this.mtx_view.copy(m);
+	}
+	
+	//射影変換行列をセット
+	setProjectionMatrix(m)
+	{
+		this.mtx_projection.copy(m);
+	}
+	
+	//ビューポート変換行列をセット
+	setViewPortMatrix(m)
+	{
+		this.mtx_viewport.copy(m);
+	}
+	
+	//MVP変換用の頂点ワークリストの準備
+	prepareVertexWorkList(need_vertex_num)
+	{
+		//ワークリストのサイズが足りない場合は拡張する
+		if(this.mvp_vertex_list.length < need_vertex_num)
+		{
+			//再確保
+			this.mvp_vertex_list = [];
+			for(let i = 0;i < need_vertex_num * 2;++i)
+			{	this.mvp_vertex_list.push(new VertexMan());	}
+		}
+	}
+	
+	//描画前処理
+	drawBegin()
+	{
+		this.funcDrawBegin(this.sc_ctx,this.sc_w,this.sc_h);
+	}
+	
+	//描画後処理
+	drawEnd()
+	{
+		this.funcDrawEnd(this.sc_ctx,this.sc_w,this.sc_h);
+	}
+	
+	//プリミティブの描画
+	drawIndexedPrimitive(vertex_list,vertex_count,index_list,primitive_count,edge_uv_list = null,edge_color = null)
+	{
+		//
+		// vertex_list		オブジェクトの頂点データリスト
+		// vertex_count		頂点リストの個数
+		// index_list		頂点順番リスト
+		// primitive_count	プリミティブの数
+		//					1プリミティブは3頂点の三角形なので
+		//					頂点順番リストの個数を3で割った数
+		// edge_uv_list     頂点順番に対応した境界線UV座標リスト
+		// edge_color       境界線色(nullの場合は境界線を描かない)
+		//
+
+		//MVP(Model View Projection)変換用の行列を作成
+		let m = this.mtx_mvp; m.initialize();
+		m.mul(this.mtx_model);		//ローカル座標の原点をワールド座標での
+									//位置に変換
+		m.mul(this.mtx_view)		//カメラの位置に合わせてワールド全体を
+									//移動・回転させる
+		m.mul(this.mtx_projection);	//射影変換して見える範囲に座標を正規化する
+		
+		//MVP変換までを行う
+		this.prepareVertexWorkList(vertex_count);
+		let dst_vertex_list = this.mvp_vertex_list;
+		
+		for(let i = 0;i < vertex_count;++i)
+		{
+			//モデル・ビュー変換変換
+			//
+			// 各3Dオブジェクトのローカル座標系からワールド座標系
+			// でのカメラから見えている風景になるように座標を変換する
+			//
+			//射影(Projection)変換
+			//
+			// この射影変換では、視点からの見える範囲(視錘台)で区切って座標を正規化
+			// します。											
+			// これによって、見える範囲のX/Y/Zの値の範囲が-1.0～1.0に変換されるので、
+			// 次のViewPort変換によって、描画先画面解像度に合わせて座標変換する必要
+			// があります。
+			// 射影変換後は左手座標系になり、
+			//
+			// X = (左)   -1.0 ～ 1.0(右)
+			// Y = (下)   -1.0 ～ 1.0(上)
+			// Z = (nearZ)-1.0 ～ 1.0(farZ)
+			//
+			// という範囲に変換されます。
+			//
+			dst_vertex_list[i].copy(vertex_list[i]);
+			dst_vertex_list[i].vv.mul_matrix(m);
+			
+			//射影変換したX/Y/Z座標をwで割るとX/Y/Zのスケーリングが完了します
+			dst_vertex_list[i].vv.x /= dst_vertex_list[i].vv.w;
+			dst_vertex_list[i].vv.y /= dst_vertex_list[i].vv.w;
+			dst_vertex_list[i].vv.z /= dst_vertex_list[i].vv.w;
+			//スケーリング後はwの値が必要ないので1.0に初期化
+			dst_vertex_list[i].vv.w = 1.0;
+		}
+
+		//ポリゴンの描画
+		this.funcDrawPrimitive(dst_vertex_list,index_list,primitive_count,edge_uv_list,edge_color);
+
+	}
+	
+	//ポリゴンをワイヤーフレームで描画
+	drawPolygonWithWireframe(vertex_list,index_list,primitive_count,edge_uv_list,edge_color)
+	{
+		//プリミティブを順番に描画
+		let point_index = 0;
+		while(primitive_count > 0)
+		{
+			//ワイヤーフレームで三角形を描画
+
+			let i1 = index_list[point_index    ];
+			let i2 = index_list[point_index + 1];
+			let i3 = index_list[point_index + 2];
+			
+			const x1 = Math.abs(vertex_list[i1].vv.x);
+			const x2 = Math.abs(vertex_list[i2].vv.x);
+			const x3 = Math.abs(vertex_list[i3].vv.x);
+			const y1 = Math.abs(vertex_list[i1].vv.y);
+			const y2 = Math.abs(vertex_list[i2].vv.y);
+			const y3 = Math.abs(vertex_list[i3].vv.y);
+			const z1 = Math.abs(vertex_list[i1].vv.z);
+			const z2 = Math.abs(vertex_list[i2].vv.z);
+			const z3 = Math.abs(vertex_list[i3].vv.z);
+			
+			//
+			// 見える範囲に含まれるものだけ描画
+			//
+			// 射影変換行列を通ってきた座標はクリッピング空間として、
+			// X/Y/Zが-1.0～1.0の範囲に変換されています。
+			// 絶対値が1より大きいものは、視野範囲外として除外できます。
+			//
+			if(((x1 <= 1.0) || (x2 <= 1.0) || (x3 <= 1.0) ||
+			    (y1 <= 1.0) || (y2 <= 1.0) || (y3 <= 1.0)) &&
+			   (z1 <= 1.0) && (z2 <= 1.0) && (z3 <= 1.0))
+			{
+				//ViewPort変換をかけるためにコピー作成
+				this.vpt_vertex1.copy(vertex_list[i1].vv);
+				this.vpt_vertex2.copy(vertex_list[i2].vv);
+				this.vpt_vertex3.copy(vertex_list[i3].vv);
+				
+				//ViewPort変換
+				//
+				// Y座標の方向をスクリーン座標系に合わせるのと、X/Y
+				// の各座標値を-1.0～1.0の範囲から画面の幅・高さの
+				// ピクセル数に変換します。
+				// Z値はそのまま残ります。
+				//
+				this.vpt_vertex1.mul_matrix(this.mtx_viewport);
+				this.vpt_vertex2.mul_matrix(this.mtx_viewport);
+				this.vpt_vertex3.mul_matrix(this.mtx_viewport);
+				
+				//三角形を描画(ブレゼンハム)
+				this.funcDrawLine(this.sc_ctx,this.sc_w,this.sc_h,
+								  this.vpt_vertex1.x,this.vpt_vertex1.y,
+						   		  this.vpt_vertex2.x,this.vpt_vertex2.y);
+
+				this.funcDrawLine(this.sc_ctx,this.sc_w,this.sc_h,
+								  this.vpt_vertex2.x,this.vpt_vertex2.y,
+								  this.vpt_vertex3.x,this.vpt_vertex3.y);
+
+				this.funcDrawLine(this.sc_ctx,this.sc_w,this.sc_h,
+								  this.vpt_vertex3.x,this.vpt_vertex3.y,
+								  this.vpt_vertex1.x,this.vpt_vertex1.y);
+			}
+
+			//インデックスを更新
+			point_index += DEF_VERTEX_NUM_FOR_PRIMITIVE;
+
+			//プリミティブを減らす
+			primitive_count--;
+		}
+	}
+	
+	//三角ポリゴンの法線ベクトルを求める
+	getNormalVectorFromPolygon(v1,v2,v3)
+	{
+		//頂点v1から頂点v2へ伸びるベクトルaと
+		//頂点v1から頂点v3へ伸びるベクトルbを求める
+		this.nv_a.x = v2.x - v1.x;
+		this.nv_a.y = v2.y - v1.y;
+		this.nv_a.z = v2.z - v1.z;
+		this.nv_b.x = v3.x - v1.x;
+		this.nv_b.y = v3.y - v1.y;
+		this.nv_b.z = v3.z - v1.z;
+
+		//ベクトルa,bの外積をとると、ベクトルa,bで成る
+		//平面に垂直なベクトルnが得られます。
+		this.nv_n.crossProduct(this.nv_a,this.nv_b);
+
+		//このベクトルを単位ベクトル化したものが頂点v1,v2,v3から
+		//なる三角形ポリゴンの法線ベクトルとなります
+		this.nv_n.normalize();
+
+		return this.nv_n;
+	}
+	
+	//エッジ関数
+	edgeFunction(a,b,c)
+	{
+		//
+		// aからbに伸びるベクトルとaからcに伸びるベクトルとの外積になります。
+		// 外積の結果の絶対値は2つのベクトルを2辺とする平行四辺形の面積に
+		// なります。
+		// また外積値の正負はポリゴンの表裏判定やポリゴンの内外判定に利用できます。
+		//
+		return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
+	}
+	
+	//ポリゴンをフラットシェーディングで描画
+	drawPolygonWithFlatShading(vertex_list,index_list,primitive_count,edge_uv_list,edge_color)
+	{
+		//プリミティブを順番に描画
+		let point_index = 0;
+		while(primitive_count > 0)
+		{
+			//フラットシェーディングで三角形ポリゴンを描画
+			
+			const i1 = index_list[point_index    ];
+			const i2 = index_list[point_index + 1];
+			const i3 = index_list[point_index + 2];
+
+			const x1 = Math.abs(vertex_list[i1].vv.x);
+			const x2 = Math.abs(vertex_list[i2].vv.x);
+			const x3 = Math.abs(vertex_list[i3].vv.x);
+			const y1 = Math.abs(vertex_list[i1].vv.y);
+			const y2 = Math.abs(vertex_list[i2].vv.y);
+			const y3 = Math.abs(vertex_list[i3].vv.y);
+			const z1 = Math.abs(vertex_list[i1].vv.z);
+			const z2 = Math.abs(vertex_list[i2].vv.z);
+			const z3 = Math.abs(vertex_list[i3].vv.z);
+			
+			//
+			// 見える範囲に含まれるものだけ描画
+			//
+			// 射影変換行列を通ってきた座標はクリッピング空間として、
+			// X/Y/Zが-1.0～1.0の範囲に変換されています。
+			// 絶対値が1より大きいものは、視野範囲外として除外できます。
+			//
+			if(((x1 <= 1.0) || (x2 <= 1.0) || (x3 <= 1.0) ||
+			    (y1 <= 1.0) || (y2 <= 1.0) || (y3 <= 1.0)) &&
+			   (z1 <= 1.0) && (z2 <= 1.0) && (z3 <= 1.0))
+			{
+				//ポリゴンの法線ベクトルを求める
+				let vNormal = this.getNormalVectorFromPolygon(vertex_list[i1].vv,vertex_list[i2].vv,vertex_list[i3].vv);
+				
+				//視線・光源とポリゴンの法線の内積をとる
+				let lightDot = vNormal.dotProduct(this.vLight);	//光源ベクトルと
+																//法線ベクトルとの内積結果
+				const eyeDot = vNormal.dotProduct(this.vEye);	//視線ベクトルと
+																//法線ベクトルとの内積結果
+				
+				//
+				// 内積の結果がマイナスの値の場合は、視線ベクトルとポリゴンの法線ベクトル
+				// とがだいたい向き合っていることを表し、結果が正の値の場合は、視線ベクトル
+				// と法線ベクトルがだいたい同じ方向を向いている、つまり、見えないことを表し
+				// ます。というわけで、向き合っているマイナスの値の場合のみ描画します。
+				// ※パースペクティブコレクトを行う場合、この判定は正しくない場合があるらしい…
+				//
+				if(eyeDot < 0.0)
+				{
+					//
+					// 面の色を計算
+					// ※lightDotを光線とポリゴン面に対しての光の当たり具合の比率とし、
+					//   拡散光(Diffuse)の値を調整します。
+					//   ただし、ポリゴンの法線ベクトルと光線ベクトルとの内積結果は負の
+					//   値となるのでマイナスをかけて正に反転させます。
+					//
+					//   もし、内積結果が正の数になった場合は光が当たらないことになるの
+					//   で、0に補正します。
+					//
+					if(lightDot > 0.0){ lightDot = 0.0; }
+					let r = Math.floor((this.vAmbientColor.x + -lightDot * this.vDiffuseColor.x) * 255);
+					let g = Math.floor((this.vAmbientColor.y + -lightDot * this.vDiffuseColor.y) * 255);
+					let b = Math.floor((this.vAmbientColor.z + -lightDot * this.vDiffuseColor.z) * 255);
+
+					//0-255の範囲に飽和
+					if(r < 0){ r = 0; }
+					else if(r > 255){ r = 255; }
+					if(g < 0){ g = 0; }
+					else if(g > 255){ g = 255; }
+					if(b < 0){ b = 0; }
+					else if(b > 255){ b = 255; }
+
+					//色を設定
+					const color = { r: r, g: g, b: b };
+					
+					//ViewPort変換をかけるためにコピー作成
+					this.vpt_vertex1.copy(vertex_list[i1].vv);
+					this.vpt_vertex2.copy(vertex_list[i2].vv);
+					this.vpt_vertex3.copy(vertex_list[i3].vv);
+					
+					//ViewPort変換
+					//
+					// Y座標の方向をスクリーン座標系に合わせるのと、X/Y
+					// の各座標値を-1.0～1.0の範囲から画面の幅・高さの
+					// ピクセル数に変換します。
+					// Z値はそのまま残ります。
+					//
+					this.vpt_vertex1.mul_matrix(this.mtx_viewport);
+					this.vpt_vertex2.mul_matrix(this.mtx_viewport);
+					this.vpt_vertex3.mul_matrix(this.mtx_viewport);
+					
+					//ポリゴンの3頂点を囲む最小矩形(バウンディングボックス)を作成
+					const v1 = this.vpt_vertex1;
+					const v2 = this.vpt_vertex2;
+					const v3 = this.vpt_vertex3;
+					let minX = v1.x,minY = v1.y,maxX = v1.x+2,maxY = v1.y+2;
+					if(v2.x      < minX){ minX = v2.x;      }
+					if(v3.x      < minX){ minX = v3.x;      }
+					if(minX      < 0   ){ minX = 0;         }
+					if(maxX      < v2.x){ maxX = v2.x+2;    }
+					if(maxX      < v3.x){ maxX = v3.x+2;    }
+					if(this.sc_w < maxX){ maxX = this.sc_w; }
+					if(v2.y      < minY){ minY = v2.y;      }
+					if(v3.y      < minY){ minY = v3.y;      }
+					if(minY      < 0   ){ minY = 0;         }
+					if(maxY      < v2.y){ maxY = v2.y+2;    }
+					if(maxY      < v3.y){ maxY = v3.y+2;    }
+					if(this.sc_h < maxY){ maxY = this.sc_h; }
+					minX = Math.floor(minX);
+					maxX = Math.floor(maxX);
+					minY = Math.floor(minY);
+					maxY = Math.floor(maxY);
+
+					let pos = this.sc_w * minY;
+					for(let y = minY;y < maxY;++y)
+					{
+						for(let x = minX;x < maxX;++x)
+						{
+							//ピクセルの中心のZ座標を補間する
+							this.target_p.setValue(x+0.5,y+0.5,1,1);
+							
+							//
+							// 描画候補のX,Y座標に0.5ずつ加算した仮想的な
+							// ピクセルの中心座標とポリゴンの各頂点の座標
+							// からEdgeFunction(2次元の外積計算)を用いて、
+							// 点pが占める3頂点の属性情報の比率が計算できます。
+							//
+							// またEdgeFunctionで得られる値は点pが内側になって
+							// いるかどうかの判定に利用できます。
+							// 反時計周りの頂点順のポリゴンの場合、0以上の正の
+							// 値になれば内側と判定できます。
+							//
+							// このあたりの話は、EdgeFunctionや重心座標系などで
+							// 調べると色々出てくると思います。
+							// 
+							// 参考
+							// https://qiita.com/N-H-Shimada/items/edf02a8dc21a4a14c8b0
+							// https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/rasterization-stage
+							//
+							
+							let w0     = this.edgeFunction(v2,v3,this.target_p);	//v2からpに伸びるベクトルとv2からv3に伸びるベクトルとの外積で、v1の頂点情報の比率に使える
+							if(w0 < 0){ continue; }									//ポリゴンの内側に存在しない場合はスキップ
+							let w1     = this.edgeFunction(v3,v1,this.target_p);	//v3からpに伸びるベクトルとv3からv1に伸びるベクトルとの外積で、v2の頂点情報の比率に使える
+							if(w1 < 0){ continue; }									//ポリゴンの内側に存在しない場合はスキップ
+							let w2     = this.edgeFunction(v1,v2,this.target_p);	//v1からpに伸びるベクトルとv1からv2に伸びるベクトルとの外積で、v3の上店情報の比率に使える
+							if(w2 < 0){ continue; }									//ポリゴンの内側に存在しない場合はスキップ
+							
+							//
+							// EdgeFunctionの答えは面積値でもあるので、全体の
+							// 面積で割ることで各頂点の属性情報の比率が算出できる
+							//
+							const area = this.edgeFunction(v1,v2,v3);	//比率計算するための分母となる
+							w0 /= area;
+							w1 /= area;
+							w2 /= area;
+							
+							//
+							// またZバッファでの前後判定に利用するZ値についても
+							// パースを考慮した補正(perspective correction)で、
+							// Z値を補間する必要があり、かなりややこしい計算で確認
+							// をした結果、
+							//
+							// 1/Z = w0 * 1/v1.z + w1 * 1/v2.z + w2 * 1/v3.z
+							//
+							// という関係が成り立つことがわかった。
+							// つまり、Z = 1 / (1/Z) として計算する。
+							//
+							// 参考
+							// https://qiita.com/N-H-Shimada/items/edf02a8dc21a4a14c8b0
+							// https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/perspective-correct-interpolation-vertex-attributes
+							//
+						
+							//事前に1/zの形にしておく
+							const z1 = 1 / v1.z;
+							const z2 = 1 / v2.z;
+							const z3 = 1 / v3.z;
+							
+							const Z = 1 / (w0 * z1 + w1 * z2 + w2 * z3);
+							
+							//すでに描かれているピクセルのZ座標よりも手前になるなら描画
+							if(this.aZBuffer[pos + x] > Z)
+							{
+								let c = { r: color.r, g: color.g, b: color.b, a: 255 };
+								
+								//境界線描画チェック
+								if(edge_color != null)
+								{
+									//Z座標の様に境界線描用のUV座標を補間する
+									//
+									// このUV座標での境界線判定は凸撃兵さん(@Stosstruppe)の
+									// 境界線描画サンプルを参考にさせて頂きました。
+									// https://twitter.com/Stosstruppe/status/1270940719448903681?s=20
+									//
+									const eu1    = edge_uv_list[point_index    ].u;
+									const eu2    = edge_uv_list[point_index + 1].u;
+									const eu3    = edge_uv_list[point_index + 2].u;
+									const ev1    = edge_uv_list[point_index    ].v;
+									const ev2    = edge_uv_list[point_index + 1].v;
+									const ev3    = edge_uv_list[point_index + 2].v;
+									const edgeU  = (w0 * eu1 + w1 * eu2 + w2 * eu3);
+									const edgeV  = (w0 * ev1 + w1 * ev2 + w2 * ev3);
+									let   edgeTh = 0.96;
+									
+									if((Math.abs(edgeU) > edgeTh) || (Math.abs(edgeV) > edgeTh))
+									{
+										//境界線の位置なので色を変更
+										c = { r: edge_color.r, g: edge_color.g, b: edge_color.b, a: 255 };
+									}
+								}
+							
+								this.drawPoint_bresenham(this.sc_w,this.sc_h,x,y,c);
+								this.aZBuffer[pos + x] = Z;	//ピクセルのZ値を更新
+							}
+						}
+						
+						//次の描画先Y座標のアドレスを算出
+						pos += this.sc_w;
+					}
+				}
+			}
+			
+			//次のポリゴン頂点インデックスへ
+			point_index += DEF_VERTEX_NUM_FOR_PRIMITIVE;
+
+			//プリミティブを減らす
+			primitive_count--;
+		}
+	}
+	
+}
+
+//パーリンノイズクラス
+//https://gist.github.com/Flafla2/f0260a861be0ebdeef76
+//↑のC#のソースを参考に雑に移植しています。
+//ご利用は自己責任でお願いします。
+class Perlin
+{
+	//コンストラクタ
+	constructor(repeat = -1)
+	{
+		//メンバの初期化
+		this.repeat = repeat;
+		
+		const permutation =
+		[
+			151,160,137,91,90,15,															// Hash lookup table as defined by Ken Perlin.  This is a randomly
+			131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,	// arranged array of all numbers from 0-255 inclusive.
+			190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
+			88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
+			77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
+			102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
+			135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
+			5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
+			223,183,170,213,119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,9,
+			129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,104,218,246,97,228,
+			251,34,242,193,238,210,144,12,191,179,162,241, 81,51,145,235,249,14,239,107,
+			49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
+			138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
+		];
+		
+		this.p = new Int32Array(512);
+		for(let x = 0;x < 512;x++)
+		{
+			this.p[x] = permutation[x%256];
+		}
+	}
+	
+	inc(num)
+	{
+		num++;
+		if(this.repeat > 0){ num %= this.repeat; }
+		return num;
+	}
+	
+	grad(hash,x,y,z)
+	{
+		 switch(hash & 0xF)
+	    {
+	        case 0x0: return  x + y;
+	        case 0x1: return -x + y;
+	        case 0x2: return  x - y;
+	        case 0x3: return -x - y;
+	        case 0x4: return  x + z;
+	        case 0x5: return -x + z;
+	        case 0x6: return  x - z;
+	        case 0x7: return -x - z;
+	        case 0x8: return  y + z;
+	        case 0x9: return -y + z;
+	        case 0xA: return  y - z;
+	        case 0xB: return -y - z;
+	        case 0xC: return  y + x;
+	        case 0xD: return -y + z;
+	        case 0xE: return  y - x;
+	        case 0xF: return -y - z;
+	        default: return 0; // never happens
+	    }
+	}
+	
+	fade(t)
+	{
+		// Fade function as defined by Ken Perlin.  This eases coordinate values
+		// so that they will "ease" towards integral values.  This ends up smoothing
+		// the final output.
+		return t * t * t * (t * (t * 6 - 15) + 10);		// 6t^5 - 15t^4 + 10t^3
+	}
+	
+	lerp(a,b,x)
+	{
+		return a + x * (b - a);
+	}
+	
+	//パーリンノイズ取得(0.0～1.0の値が返ります)
+	perlin(x,y,z)
+	{
+		if(this.repeat > 0)
+		{
+			// If we have any repeat on, 
+			// change the coordinates to their "local" repetitions
+			x = x % this.repeat;
+			y = y % this.repeat;
+			z = z % this.repeat;
+		}
+		
+		const xi = Math.floor(x) & 255;		// Calculate the "unit cube" that the point asked will be located in
+		const yi = Math.floor(y) & 255;		// The left bound is ( |_x_|,|_y_|,|_z_| ) and the right bound is that
+		const zi = Math.floor(z) & 255;		// plus 1.  Next we calculate the location (from 0.0 to 1.0) in that cube.
+		const xf = x - Math.floor(x);		// We also fade the location to smooth the result.
+		const yf = y - Math.floor(y);
+		const zf = z - Math.floor(z);
+		const  u = this.fade(xf);
+		const  v = this.fade(yf);
+		const  w = this.fade(zf);
+															
+		const aaa = this.p[this.p[this.p[         xi ]+         yi ]+         zi ];
+		const aba = this.p[this.p[this.p[         xi ]+this.inc(yi)]+         zi ];
+		const aab = this.p[this.p[this.p[         xi ]+         yi ]+this.inc(zi)];
+		const abb = this.p[this.p[this.p[         xi ]+this.inc(yi)]+this.inc(zi)];
+		const baa = this.p[this.p[this.p[this.inc(xi)]+         yi ]+         zi ];
+		const bba = this.p[this.p[this.p[this.inc(xi)]+this.inc(yi)]+         zi ];
+		const bab = this.p[this.p[this.p[this.inc(xi)]+         yi ]+this.inc(zi)];
+		const bbb = this.p[this.p[this.p[this.inc(xi)]+this.inc(yi)]+this.inc(zi)];
+	
+		let x1 = this.lerp(this.grad(aaa, xf  , yf  , zf),	// The gradient function calculates the dot product between a pseudorandom
+						   this.grad(baa, xf-1, yf  , zf),	// gradient vector and the vector from the input coordinate to the 8
+						   u);								// surrounding points in its unit cube.
+		let x2 = this.lerp(this.grad(aba, xf  , yf-1, zf),	// This is all then lerped together as a sort of weighted average based on the faded (u,v,w)
+						   this.grad(bba, xf-1, yf-1, zf),	// values we made earlier.
+						   u);
+		let y1 = this.lerp(x1, x2, v);
+
+		x1 = this.lerp(this.grad(aab, xf  , yf  , zf-1),
+					   this.grad(bab, xf-1, yf  , zf-1),
+					   u);
+		x2 = this.lerp(this.grad(abb, xf  , yf-1, zf-1),
+		          	   this.grad(bbb, xf-1, yf-1, zf-1),
+		          	   u);
+		let y2 = this.lerp(x1, x2, v);
+		
+		return (this.lerp(y1, y2, w)+1)/2;	// For convenience we bound it to 0 - 1 (theoretical min/max before is -1 - 1)
+	}
+	
+	octavePerlin(x,y,z,octaves,persistence)
+	{
+		let total     = 0;
+		let frequency = 1;
+		let amplitude = 1;
+		let maxValue  = 0;	// Used for normalizing result to 0.0 - 1.0
+		for(let i=0;i<octaves;i++)
+		{
+			total += this.perlin(x * frequency, y * frequency, z * frequency) * amplitude;
+			
+			maxValue += amplitude;
+			
+			amplitude *= persistence;
+			frequency *= 2;
+		}
+		
+		return total/maxValue;
+	}
+	
+}
+
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_offsc;							//自力描画用オフスクリーン
+let g_draw_algo;						//選択中の描画アルゴリズムインデックス
+let g_renderingman;						//レンダリング担当
+
+let g_obj;								//表示用オブジェクト
+let g_aPos = [];						//各オブジェクトの位置情報など
+let g_edge_color;						//オブジェクトの境界線色
+let g_pn   = new Perlin();				//パーリンノイズ生成用
+let g_cnt  = 0;
+
+const MOVE_SPEED  = 6;
+const ANGLE_SPEED = 3;
+const ANGLE_MAX   = 60;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+function init_game()
+{
+	
+	//ゲームの初期化処理
+	
+	//画面調整
+	adjust_screen();
+	
+	//ゲームに必要なオブジェクトの生成
+	create_obj();
+	
+	//描画処理方法を準備
+	g_draw_algo = -1;
+	change_draw_algorithm();
+	window.onmousedown = change_draw_algorithm;
+	window.ontouchdown = change_draw_algorithm;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render_game);
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+			
+			//のびるCubeの場合変動が激しいので過去2回分が良いみたい
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function adjust_screen()
+{
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width) / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//オフスクリーン用のImageDataを作成
+	let ctx = screen.getContext("2d");
+	g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+}
+
+function create_obj()
+{
+	//オブジェクトの生成
+	
+	//レンダリング担当の準備
+	const screen     = document.getElementById("game-screen");	//描画先canvas
+	const algo_label = document.getElementById("algo");
+	g_renderingman = new RenderingMan(screen,g_offsc,algo_label);
+	
+	//ViewPort行列と射影行列をセット
+	let mtx_viewport   = new MatrixMan4();
+	let mtx_projection = new MatrixMan4();
+	
+	mtx_viewport.viewPort(0,0,g_game_width,g_game_height);
+	mtx_projection.projectionOpenGL(NEAR_Z_POS,FAR_Z_POS,rad(60),g_game_width/g_game_height);
+	g_renderingman.setViewPortMatrix(mtx_viewport);
+	g_renderingman.setProjectionMatrix(mtx_projection);
+	
+	//ビュー行列をセット
+	let vFrom    = new VectorMan3(0.0,60.0,142.0);
+	let vTo      = new VectorMan3(0.0,0.0,0.0);
+	let vUp      = new VectorMan3(0.0,1.0,0.0);
+	let mtx_view = new MatrixMan4();
+		
+	mtx_view.view(vFrom,vTo,vUp);
+	g_renderingman.setViewMatrix(mtx_view);
+
+	//拡散光色をセット
+	g_renderingman.setDefuseLightColor(0.5,0.5,0.5);
+	
+	
+	//オブジェクトの準備
+	g_obj = new CubeObjMan();
+	
+	//沢山並べるオブジェクト情報配列を作成
+	const domino_num = 70;
+	for(let i = 0;i < domino_num;++i)
+	{
+		//初期状態をセット
+		const r = 50;
+		const a = -rad(360/domino_num) * i;
+		let info =
+		{
+			x: Math.cos(a) * r, y: 0,
+			z: Math.sin(a) * r, a: a,
+			o: -i * 5,
+		};
+		g_aPos.push(info);
+	}
+	
+	//境界線色をセット
+	g_edge_color = { r: 0, g: 0, b: 0, a: 255 };
+
+}
+
+function change_draw_algorithm()
+{
+	//描画アルゴリズムの選択
+	
+	g_draw_algo = (g_draw_algo + 1) % 2;
+	
+	switch(g_draw_algo)
+	{
+		case 0:	//フラットシェーディング描画
+			g_renderingman.setupFlatShading();
+			break;
+
+		case 1:	//ContextのLINE描画
+			g_renderingman.setupContextLine();
+			break;
+			
+		case 2:	//ブレゼンハムLINE描画
+			g_renderingman.setupBresenhamLine();
+			break;
+			
+		case 3:	//ダブルステップブレゼンハムLINE描画
+			g_renderingman.setupDoubleStepBresenhamLine();
+			break;
+		
+		case 4:	//アンチエイリアス付きブレゼンハムLINE描画
+			g_renderingman.setupBresenhamLineAA();
+			break;
+	}
+
+}
+
+function draw_wire()
+{
+	//ワイヤーフレームとかの描画処理
+	
+	//描画前処理
+	g_renderingman.drawBegin();
+
+	//現在のFPSによって早送りをする
+	//（最初は落ち着くまですごく速く動いたりします）
+	let FF = Math.round(60 / (Math.ceil(g_fps / 10) * 10));
+	if(FF < 1) 		 { FF =  1; }
+	else if(FF > 60) { FF = 60; }
+	
+	//オブジェクトを動かす
+	let mtx_scale   = new MatrixMan4();
+	let mtx_rotateX = new MatrixMan4();
+	let mtx_rotateY = new MatrixMan4();
+	let mtx_rotateZ = new MatrixMan4();
+	let mtx_model   = new MatrixMan4();
+	let mtx_offset  = new MatrixMan4();
+	let mtx_pos     = new MatrixMan4();
+	
+	//オブジェクトのサイズを調整
+	mtx_scale.scale(4.0,8.0,2.0);
+
+	//オブジェクトの軸をずらす
+	mtx_offset.translate(0.0,0.5,0.5);
+	
+	//傾き初めの先頭を見つけてそこに注目する
+	for(let i = 0;i < g_aPos.length;++i)
+	{
+		if(((g_cnt + g_aPos[i].o) % 360) == 0)
+		{
+			//先頭に注目するビュー行列をセット
+			let na       = g_pn.perlin(g_cnt / 100,Math.floor(g_cnt / 100) % 256,0);
+			let z_offset = 60 * Math.sin(rad(na * 360));
+			let vFrom    = new VectorMan3(80.0 * na,20.0 + 60.0 * (na*na),60-z_offset);
+			let vTo      = new VectorMan3(g_aPos[i].x,g_aPos[i].y,g_aPos[i].z);
+			let vUp      = new VectorMan3(0.0,1.0,0.0);
+			let mtx_view = new MatrixMan4();
+				
+			mtx_view.view(vFrom,vTo,vUp);
+			g_renderingman.setViewMatrix(mtx_view);
+			
+			break;
+		}
+	}
+	
+	for(let i = 0;i < g_aPos.length;++i)
+	{
+		//オブジェクトの位置を取得
+		mtx_pos.translate(g_aPos[i].x,
+						  g_aPos[i].y,
+						  g_aPos[i].z);
+		
+		//円になるように回転
+		mtx_rotateY.rotateY(-g_aPos[i].a);
+	
+		//傾ける
+		const ref = 90;
+		let cnt = (g_cnt + g_aPos[i].o) % 360;
+		if(cnt > ref)
+		{	cnt = ref - (cnt - ref);	}
+		let angle = cnt * ANGLE_SPEED;
+		if(angle < 0)
+		{	angle = 0;			}
+		else if(angle > ANGLE_MAX)
+		{	angle = ANGLE_MAX;	}
+		mtx_rotateX.rotateX(rad(-angle));
+		
+		//モデル変換行列の初期化
+		mtx_model.initialize();
+		
+		//ずらす
+		mtx_model.mul(mtx_offset);
+		
+		//拡大
+		mtx_model.mul(mtx_scale);
+		
+		//倒す
+		mtx_model.mul(mtx_rotateX);
+		
+		//配置
+		mtx_model.mul(mtx_rotateY);
+		mtx_model.mul(mtx_pos);
+		
+		//レンダラにセット
+		g_renderingman.setModelMatrix(mtx_model);
+			
+		//オブジェクトの描画
+		g_renderingman.drawIndexedPrimitive(g_obj.vertexList,g_obj.vertexNum,
+											g_obj.polyIndexList,g_obj.primitiveNum,
+											g_obj.polyUVList,g_edge_color);
+	}
+	
+	//描画後処理(画面に転送)
+	g_renderingman.drawEnd();
+	
+	g_cnt++;
+
+}
+
+function render_game()
+{
+	
+	//ゲームの描画処理
+	
+	//ワイヤーフレームとかの描画
+	draw_wire();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render_game);
+
+}
+
+</script>
+</head>
+<body onload="init_game()">
+	<div id="fps"></div>
+	<div id="algo"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
