@@ -1,0 +1,586 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパののびるCube4</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+
+	このデモは、JavaScriptで擬似3D表示をして高速表示を試みたものです。
+	
+	今回は、chaosgroove(@chaosgroove)さんの作品を元ネタにしてみました。
+	https://twitter.com/chaosgroove/status/1215251400994648064?s=20
+	
+	オリジナル作者のchaosgrooveさんに圧倒的感謝を！
+	
+	(C)2020 ぼいち(@voich2014)
+
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: black;
+		color: #fff;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:0px;
+		z-index: 100;
+	}
+
+	.rotate
+	{
+		-webkit-transform: rotateX(56deg);
+		   -moz-transform: rotateX(56deg);
+		    -ms-transform: rotateX(56deg);
+		     -o-transform: rotateX(56deg);
+		        transform: rotateX(56deg);
+	}
+	
+	#game-screen 
+	{
+		position:absolute;
+	}
+
+	#cube-chip
+	{
+		display: none;
+	}
+
+	#cube-mask
+	{
+		position:absolute;
+	}
+
+-->
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width        = 320;
+let g_game_height       = 500;
+
+const COLOR_STEP        = 5;
+const BLOCK_WIDTH       = 10;			//正方形の対角線
+const BLOCK_HEIGHT      = 120;
+const BLOCK_WIDTH_HIGH  = 16;			//高解像度用
+const BLOCK_HEIGHT_HIGH = 180;
+
+const BLOCK_W_NUM       = 32;
+const BLOCK_H_NUM       = 32;
+const CHECK_INTERVAL    = 1000;
+const COLOR_CHANGE_WAIT = 1200;
+
+let g_blocks            = [];			//ブロック管理用
+let g_block_w_num       = BLOCK_W_NUM;	//ブロックの列個数
+let g_block_h_num       = BLOCK_H_NUM;	//ブロックの行個数
+let g_block_width       = BLOCK_WIDTH;
+let g_block_height      = BLOCK_HEIGHT;
+let g_last_check        = 0;			//最後にチェックした時刻
+let g_last_action       = 0;			//最後に動いていた時刻
+let g_last_color_change = 0;			//最後に色を変えた時刻
+let g_color             = 0;			//ブロックの色
+
+const g_first_speed     = 0.942;		//基準の初速
+const g_gravi_accel_up  = -0.027;		//上昇中の重力加速度
+const g_down_speed      = -0.084;		//下降中の速度
+const g_delay_speed     = 0.55;			//遅延速度
+const g_down_accel      = 0.095;		//下降加速度
+
+let g_last_fps_time     = 0;
+let g_fps_count         = 0;
+let g_fps               = 60;
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function HEX02X(v)
+{
+	// %02X 変換
+	return (('00' + v.toString(16).toUpperCase()).substr(-2));
+}
+
+function hls2rgb(h,s,l)
+{
+	//HLSからRGBに変換
+	//
+	//  h(hue)       : 色相  0-359の値[度]
+	//  s(saturation): 彩度  0-1.0の値[%]
+	//  l(lightness) : 明度  0-1.0の値[%]
+	//
+	let max,min;
+	let r,g,b;
+	
+	//念のためHを補正
+	h = h % 360;
+
+	if(l < 0.5)
+	{
+		max = 255 * (l + l * (s / 1.0));
+		min  = 255 * (l - l * (s / 1.0));
+	}
+	else
+	{
+		max = 255 * (l + (1.0 - l) * (s / 1.0));
+		min = 255 * (l - (1.0 - l) * (s / 1.0)); 
+	}
+	 
+	if(h < 60)
+	{
+		r = max;
+		g = min + (max - min) * (h / 60);
+		b = min;
+	}
+	else if((h >= 60) && (h < 120))
+	{
+		r = min + (max - min) * ((120 - h) / 60);
+		g = max;
+		b = min;
+	 }
+	 else if((h >= 120) && (h < 180))
+	 {
+		r = min;
+		g = max;
+		b = min + (max - min) * ((h - 120) / 60);        
+	}
+	else if((h >= 180) && (h < 240))
+	{
+		r = min;
+		g = min + (max - min) * ((240 - h) / 60);
+		b = max;
+	}
+	else if((h >= 240) && (h < 300))
+	{
+		r = min + (max - min) * ((h - 240) / 60);
+		g = min;
+		b = max;
+	}
+	else if((h >= 300) && (h < 360))
+	{
+		r = max;
+		g = min;
+		b = min + (max - min) * ((360 - h) / 60); 
+	}
+
+	r =  Math.round(r);
+	g =  Math.round(g);
+	b =  Math.round(b);
+	
+	return `rgb(${r},${g},${b})`;
+}
+
+function init_game()
+{
+	
+	//ゲームの初期化処理
+	
+	//画面調整
+	adjust_screen();
+	
+	//ゲームに必要なオブジェクトの生成
+	create_obj();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render_game);
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (g_fps_count*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = (g_fps + fps) / 2;			//平均にすることで速度調整時に参照するFPSの変化を緩和させる
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function adjust_screen()
+{
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width   = 1280;
+		g_game_height  = 720;
+		
+		g_block_width  = BLOCK_WIDTH_HIGH;
+		g_block_height = BLOCK_HEIGHT_HIGH;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width) / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+	
+	//マスクを配置
+	let mask = document.getElementById("cube-mask");
+	mask.style.left   = game_x+"px";
+	mask.style.top    = game_y+"px";
+	mask.width        = g_game_width;
+	mask.height       = g_game_height;
+
+}
+
+function create_obj()
+{
+	//オブジェクトの生成
+	
+	//スプライトのチップを準備
+	let cube_chip   = document.getElementById("cube-chip");
+	let ctx         = cube_chip.getContext("2d");
+	const color_num = 360 / COLOR_STEP;
+	const bl_w      = g_block_width;
+	const bl_w2     = g_block_width / 2;
+	const bl_h      = g_block_height;
+	
+	cube_chip.width  = color_num * bl_w;
+	cube_chip.height = bl_w + bl_h;
+	
+	//各色ごとのブロックを準備
+	for(let i = 0;i < color_num;++i)
+	{
+		//※HLSで色変えようかと思ったけど、やっぱり灰色固定にしました
+		
+	    //左側の明るい方の面を描画
+	    ctx.fillStyle = "#444";//hls2rgb(i * COLOR_STEP,1.0,0.4);
+	    ctx.beginPath();
+	    ctx.moveTo(i * bl_w,bl_w2);
+	    ctx.lineTo(i * bl_w,bl_w+bl_h);
+	    ctx.lineTo(i * bl_w + bl_w2,bl_w+bl_h);
+	    ctx.lineTo(i * bl_w + bl_w2,bl_w2);
+	    ctx.lineTo(i * bl_w,bl_w2);
+	    ctx.closePath();
+	    ctx.fill();
+	    
+	    //右側の暗い方の面を描画
+	    ctx.fillStyle = "#111";//hls2rgb(i * COLOR_STEP,1.0,0.2);
+	    ctx.beginPath();
+	    ctx.moveTo((i+1) * bl_w,bl_w2);
+	    ctx.lineTo((i+1) * bl_w,bl_w+bl_h);
+	    ctx.lineTo(i * bl_w + bl_w2,bl_w+bl_h);
+	    ctx.lineTo(i * bl_w + bl_w2,bl_w2);
+	    ctx.lineTo((i+1) * bl_w,bl_w2);
+	    ctx.closePath();
+	    ctx.fill();
+	    
+	    //天辺の正方形を描く
+		ctx.fillStyle   = "#666";//hls2rgb(i * COLOR_STEP,1.0,0.5);
+		ctx.strokeStyle = ctx.fillStyle;
+	    ctx.beginPath();
+	    ctx.moveTo(i * bl_w,bl_w2);
+	    ctx.lineTo(i * bl_w + bl_w2,0);
+	    ctx.lineTo((i+1) * bl_w,bl_w2);
+	    ctx.lineTo(i * bl_w + bl_w2,bl_w);
+	    ctx.lineTo(i * bl_w,bl_w2);
+	    ctx.closePath();
+	    ctx.stroke();
+	    ctx.fill();
+	}
+	
+	//ブロックの並びを生成
+	const sc_w  = g_game_width;
+	const sc_h  = g_game_height;
+	const sc_w2 = sc_w / 2;
+	const sc_h2 = sc_h / 2;
+	const sc_cx = sc_w2;
+	const sc_cy = sc_h2;
+	
+	//各ブロックの中心点の座標を決めて
+	//そこから各パラメータを設定する
+	const aZ = rad(45);
+	const w  = Math.sqrt(2) * bl_w2;
+	for(let y = 0;y < g_block_h_num;++y)
+	{
+		const ypos = -(w * g_block_h_num / 2) + y * w + (w / 2);		//(0,0)を中心とした座標にする
+		for(let x = 0;x < g_block_w_num;++x)
+		{
+			const xpos = -(w * g_block_w_num / 2) + x * w + (w / 2);	//(0,0)を中心とした座標にする
+			
+			//Z軸で45度回転させる
+			const bl_cx = xpos * Math.cos(aZ) - Math.sin(aZ) * ypos;
+			const bl_cy = xpos * Math.sin(aZ) + Math.cos(aZ) * ypos;
+			
+			//Cubeチップを描画する左上座標を決める
+			const sx = bl_cx - bl_w2 + sc_cx;
+			const sy = bl_cy - bl_w2 + sc_cy;
+			
+			//中心からの距離を計算
+			const dx   = x - (g_block_w_num / 2);
+			const dy   = y - (g_block_h_num / 2);
+			let   dist = Math.sqrt(dx*dx+dy*dy);
+			
+			//端っこの部分は動かさないようにdistを
+			//マイナスにして分かるようにする
+			if((x == 0) || (y == 0) ||
+			   (x == (g_block_w_num - 1)) || 
+			   (y == (g_block_h_num - 1)))
+		   	{
+		   		dist = -1;
+		   	}
+			
+			//オブジェクト追加
+			let obj = { x: sx, y: sy, dist: dist,
+						pow: 0, spd: 0, delay: 0, down_spd: 0 };
+			g_blocks.push(obj);
+		}
+	}
+
+	//底面からはみ出ている部分を隠すマスクを生成
+	let cube_mask = document.getElementById("cube-mask");
+	let ctx_mask  = cube_mask.getContext("2d");
+	
+	ctx_mask.fillStyle = "#000";
+    ctx_mask.beginPath();
+    ctx_mask.moveTo(sc_w2,sc_h2 + bl_w * g_block_h_num / 2);
+    ctx_mask.lineTo(sc_w2 + bl_w * g_block_w_num / 2,sc_h2);
+    ctx_mask.lineTo(sc_w2 + bl_w * g_block_w_num / 2,sc_h);
+    ctx_mask.lineTo(sc_w2 - bl_w * g_block_w_num / 2,sc_h);
+    ctx_mask.lineTo(sc_w2 - bl_w * g_block_w_num / 2,sc_h2);
+    ctx_mask.lineTo(sc_w2,sc_h2 + bl_w * g_block_h_num / 2);
+    ctx_mask.closePath();
+    ctx_mask.fill();
+
+}
+
+function draw_cube()
+{
+	//のびるCubeの描画処理	
+	let screen    = document.getElementById("game-screen");	//描画先canvas
+	let cube_chip = document.getElementById("cube-chip");	//スプライト用canvas
+
+	//毎ターンの画面クリア
+	let ctx = screen.getContext("2d");
+	ctx.clearRect(0,0,screen.width,screen.height);
+
+	//現在のFPSによって早送りをする
+	let FF = Math.round(60 / (Math.ceil(g_fps / 10) * 10));
+	if(FF < 1) 		 { FF =  1; }
+	else if(FF > 30) { FF = 30; }
+	
+	//オブジェクトを動かす
+	const block_num = g_blocks.length;
+	for(let i = 0;i < block_num;++i)
+	{
+		let bl = g_blocks[i];
+		
+		//ブロックの長さを計算
+		let pow = bl.pow;
+		for(let f = 0;f < FF;++f)
+		{
+			if(bl.delay > 0)
+			{
+				//動き出せるまで待つ
+				bl.delay--;
+				pow = 0;
+			}
+			else
+			{
+				//速度によって伸ばす
+				pow += bl.spd;
+				
+				//伸び代更新
+				if(pow < 0){ pow = 0; }
+				bl.pow = pow;
+				
+				//速度更新
+				if(bl.spd > 0)
+				{	
+					//上昇中の重力加速度を加算
+					bl.spd += g_gravi_accel_up;
+				}
+				else
+				{
+					//下降中の速度は固定にする
+					bl.spd = bl.down_spd;
+				}
+			}
+		}
+		
+		//伸ばす
+		pow = 1.0 + pow;
+		
+		//オブジェクトの描画
+		let bl_x = g_color * g_block_width;
+		let bl_y = 0;
+		let bl_w = g_block_width;
+		let bl_h = g_block_width + g_block_height;
+		let sp_x = bl.x;
+		let sp_y = bl.y - pow * bl_w;
+		
+		ctx.drawImage(cube_chip,bl_x,bl_y,bl_w,bl_h,sp_x,sp_y,bl_w,bl_h);
+	}
+
+}
+
+function check_start()
+{
+	//スタートのタイミングを図る
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	//チェック周期の確認
+	if((now_time - g_last_check) >= CHECK_INTERVAL)
+	{
+		//ブロックが動いてるかをチェック
+		const block_num = g_blocks.length;
+		let action      = 0;
+		for(let i = 0;i < block_num;++i)
+		{
+			if(g_blocks[i].pow != 0)
+			{
+				//なんか動いているので、チェックして抜ける
+				action = 1;
+				break;
+			}
+		}
+		
+		//最後に動いていた時刻を更新
+		if(action)
+		{	g_last_action = now_time;	}
+		
+		//動いていない期間が一定時間以上になったら動き出す
+		if((now_time - g_last_action) >= CHECK_INTERVAL)
+		{
+			//端っこの距離を計算
+			const radius = (g_block_w_num / 2) * Math.sqrt(2);	// 1:1:√2 の三平方の定理から対角線の距離を出す
+
+			for(let i = 0;i < block_num;++i)
+			{
+				//中心からの距離によってパラメータを設定
+			
+				const ratio  = (radius - g_blocks[i].dist) / radius;
+				const iratio = 1 - ratio;
+				
+				g_blocks[i].spd      = (g_first_speed / 6) + g_first_speed
+									    - (Math.sin(rad(iratio * 45)) * g_first_speed);		//山が円弧の様に丸く削れるように調整
+				g_blocks[i].delay    = (g_blocks[i].dist * 10) * g_delay_speed;				//中心から離れる要領で遅延させる
+				g_blocks[i].down_spd = g_down_speed - g_down_accel * ratio;					//中心の下降速度はちょっと速くする
+				g_blocks[i].pow      = -1;
+				
+				if(g_blocks[i].dist == 0)
+				{
+					//中心は遅延無し
+					g_blocks[i].delay = 0;
+				}
+				else
+				{
+					if(g_blocks[i].dist < 0)
+					{
+						//端っこの動かさないブロックなので、
+						//速度を0にする
+						g_blocks[i].spd      = 0;
+						g_blocks[i].down_spd = 0;
+						g_blocks[i].pow      = 0;
+					}
+					else
+					{
+						//ばらつきを与える
+						g_blocks[i].spd   -= (rnd(4) / 10);
+						g_blocks[i].delay += (rnd(8) / 10);
+					}
+				}
+			}
+		}
+	}
+	
+	//色変化時刻チェック
+	if((now_time - g_last_color_change) >= COLOR_CHANGE_WAIT)
+	{
+		//色変更
+		g_color++;
+		g_color %= (360 / COLOR_STEP);
+		g_last_color_change = now_time;
+	}
+
+}
+
+function render_game()
+{
+	
+	//ゲームの描画処理
+	
+	//のびるCube描画
+	draw_cube();
+	
+	//スタートのタイミングを図る
+	check_start();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render_game);
+
+}
+
+</script>
+</head>
+<body onload="init_game()">
+	<div id="fps"></div>
+	<canvas id="game-screen" class="rotate"></canvas>
+	<canvas id="cube-chip"></canvas>
+	<canvas id="cube-mask" class="rotate"></canvas>
+</body>
+</html>

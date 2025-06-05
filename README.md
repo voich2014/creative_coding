@@ -83,6 +83,7 @@ creative_coding/
  - 040.`earth`：[パパの球体テクスチャ](https://voich2014.github.io/creative_coding/src/earth/index1.html)
  - 041.`maze`：[パパのちっちゃい迷路](https://voich2014.github.io/creative_coding/src/maze/index1.html)
  - 042.`idomi`：[パパの無限ドミノ](https://voich2014.github.io/creative_coding/src/idomi/index5.html)
+ - 043.`cube`：[パパののびるCube](https://voich2014.github.io/creative_coding/src/cube/index4.html)
 
 ---
 
