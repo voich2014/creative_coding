@@ -1,0 +1,421 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのスリットアニメ</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、繭(@mayutotsu)さんがnoteで書かれた、
+	「Processingでスリットアニメーションを作ってみたよ」を参考に、ぼいちも
+	JavaScriptで作ってみました。
+	
+	わかりやすい解説をして下さった繭さんに、圧倒的感謝を！！
+	
+	繭さんのnote「Processingでスリットアニメーションを作ってみたよ」
+	https://note.com/mayutotsu/n/nd013a3c3a0ad
+	
+	(C)2020 ぼいち(@voich2014)
+	
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: white;
+		color: #000;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #000;
+		bottom:0px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+	
+	#slit-canvas
+	{
+		position:absolute;
+		display: none;
+	}
+	
+	#slit-work
+	{
+		position:absolute;
+		display: none;
+	}
+	
+	#slit-mask
+	{
+		position:absolute;
+		display: none;
+	}
+
+-->
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+const TRIANGLE_CENTER_RADIUS = 80;
+const TRIANGLE_RADIUS_OUT    = TRIANGLE_CENTER_RADIUS;
+const TRIANGLE_RADIUS_IN     = TRIANGLE_RADIUS_OUT - 20;
+const ANIMATION_NUM          = 8;
+const ANIME_WAIT             = 16;
+
+let g_X             = 0;
+let g_mask_width    = g_game_width;
+let g_anime_width   = g_mask_width * 2;
+let g_cnt           = 0;
+let g_wait          = ANIME_WAIT;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function HEX02X(v)
+{
+	// %02X 変換
+	return (('00' + v.toString(16).toUpperCase()).substr(-2));
+}
+
+function init_game()
+{
+	
+	//ゲームの初期化処理
+	
+	//画面調整
+	adjust_screen();
+	
+	//ゲームに必要なオブジェクトの生成
+	create_obj();
+	
+	//アニメーション速度変更イベントを登録
+	window.onmousedown = change_anime_wait;
+	window.ontouchdown = change_anime_wait;
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render_game);
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		fps_div.innerText = "FPS:"+(g_fps_count*(1000/(now_time - g_last_fps_time)));
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function adjust_screen()
+{
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width) / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function change_anime_wait()
+{
+	//アニメーション速度を変更
+	g_wait = Math.floor(g_wait / 2);
+	if(g_wait == 0)
+	{
+		g_wait = ANIME_WAIT;
+	}
+	g_cnt = (((g_game_width / 2) + (g_mask_width / 2)) - g_X) * g_wait;
+	
+}
+
+function calc_triangle_vertex(x,y,r)
+{
+	//指定の中心座標から正三角形の頂点座標を計算
+	let vertex_list = [];
+	let angles = [ 90, 210, 330 ];
+	for(let i = 0;i < angles.length;++i)
+	{
+		let vx     = x + Math.cos(rad(-angles[i])) * r;
+		let vy     = y + Math.sin(rad(-angles[i])) * r;
+		let vertex = { x: vx, y: vy };
+		
+		vertex_list.push(vertex);
+	}
+
+	return vertex_list;
+
+}
+
+function calc_rotateZ(x,y,cx,cy,angle)
+{
+	//指定の座標が任意の中心から回転した座標を計算
+	
+	//回転の中心からの差分座標になるように移動
+	const dx = cx;
+	const dy = cy;
+	x += -dx;
+	y += -dy;
+	
+	//回転
+	let rx = x * Math.cos(angle) - Math.sin(angle) * y;
+	let ry = x * Math.sin(angle) + Math.cos(angle) * y;
+	
+	//回転の中心からの差分座標に戻す
+	rx += dx;
+	ry += dy;
+	
+	let vertex = { x: rx, y: ry };
+	return vertex;
+
+}
+
+function create_obj()
+{
+	//オブジェクトの生成
+	
+	const sc_w  = g_game_width;
+	const sc_h  = g_game_height;
+	const sc_w2 = sc_w / 2;
+	const sc_h2 = sc_h / 2;
+	
+	//スリットアニメの描画先とワークをスクリーンと同じサイズにする
+	let slit_canvas = document.getElementById("slit-canvas");	//スリットアニメ用描画先
+	let slit_work   = document.getElementById("slit-work");		//スリットアニメ用一時描画先
+	let slit_mask   = document.getElementById("slit-mask");		//スリットマスク用描画先
+	let ctx_canvas  = slit_canvas.getContext("2d");
+	let ctx_work    = slit_work.getContext("2d");
+	let ctx_mask    = slit_mask.getContext("2d");
+	
+	slit_canvas.width  = sc_w;
+	slit_canvas.height = sc_h;
+	slit_work.width    = sc_w;
+	slit_work.height   = sc_h;
+	
+	//3つの正三角形の中心座標を計算
+	const triangle_center_list = calc_triangle_vertex(sc_w2,sc_h2,TRIANGLE_CENTER_RADIUS);
+	
+	//アニメパターンの準備
+	let aZ = 0;
+	for(let ani = 0;ani < ANIMATION_NUM;++ani)
+	{
+		//一時描画先をクリア
+		ctx_work.clearRect(0,0,sc_w,sc_h);
+		
+		//Z軸回転角度取得
+		const aZrad = rad(aZ);
+		
+		//3つの正三角形を描画
+		for(let i = 0;i < triangle_center_list.length;++i)
+		{
+			//中心の座標
+			const cx = triangle_center_list[i].x;
+			const cy = triangle_center_list[i].y;
+			
+			//正三角形の外側の頂点リストを計算
+			let vertex_out_list = calc_triangle_vertex(cx,cy,TRIANGLE_RADIUS_OUT);
+			
+			//回転
+			vertex_out_list[0] = calc_rotateZ(vertex_out_list[0].x,vertex_out_list[0].y,cx,cy,aZrad);
+			vertex_out_list[1] = calc_rotateZ(vertex_out_list[1].x,vertex_out_list[1].y,cx,cy,aZrad);
+			vertex_out_list[2] = calc_rotateZ(vertex_out_list[2].x,vertex_out_list[2].y,cx,cy,aZrad);
+			
+			//外側の三角形を黒で塗りつぶす
+			ctx_work.globalCompositeOperation = "source-over";
+			ctx_work.fillStyle   = "#000";
+			ctx_work.strokeStyle = "#000";
+			ctx_work.lineWidth   = 1;
+			ctx_work.beginPath();
+			ctx_work.moveTo(vertex_out_list[0].x,vertex_out_list[0].y);
+			ctx_work.lineTo(vertex_out_list[1].x,vertex_out_list[1].y);
+			ctx_work.lineTo(vertex_out_list[2].x,vertex_out_list[2].y);
+			ctx_work.lineTo(vertex_out_list[0].x,vertex_out_list[0].y);
+			ctx_work.closePath();
+		    ctx_work.fill();
+			
+			//正三角形の内側の頂点リストを計算
+			let vertex_in_list = calc_triangle_vertex(cx,cy,TRIANGLE_RADIUS_IN);
+			
+			//回転
+			vertex_in_list[0] = calc_rotateZ(vertex_in_list[0].x,vertex_in_list[0].y,cx,cy,aZrad);
+			vertex_in_list[1] = calc_rotateZ(vertex_in_list[1].x,vertex_in_list[1].y,cx,cy,aZrad);
+			vertex_in_list[2] = calc_rotateZ(vertex_in_list[2].x,vertex_in_list[2].y,cx,cy,aZrad);
+			
+			//内側の三角形を透明になるように塗りつぶす
+			ctx_work.globalCompositeOperation = "destination-out";
+			ctx_work.fillStyle   = "#000";
+			ctx_work.strokeStyle = "#000";
+			ctx_work.lineWidth   = 1;
+			ctx_work.beginPath();
+			ctx_work.moveTo(vertex_in_list[0].x,vertex_in_list[0].y);
+			ctx_work.lineTo(vertex_in_list[1].x,vertex_in_list[1].y);
+			ctx_work.lineTo(vertex_in_list[2].x,vertex_in_list[2].y);
+			ctx_work.lineTo(vertex_in_list[0].x,vertex_in_list[0].y);
+			ctx_work.closePath();
+		    ctx_work.fill();
+		}
+		
+		//1ラインずつコピー
+		const line_start = ani;
+		for(let x = line_start;x < sc_w;x += ANIMATION_NUM)
+		{
+			ctx_canvas.drawImage(slit_work,x,0,1,sc_h,x,0,1,sc_h)
+		}
+		
+		//Z軸回転の角度を更新
+		aZ += (360 / ANIMATION_NUM);
+		aZ %= 360;
+	}
+	
+	//スリットマスクの生成
+	const mask_w     = g_mask_width;
+	slit_mask.width  = mask_w;
+	slit_mask.height = sc_h;
+	
+	for(let x = 0;x < mask_w;x += ANIMATION_NUM)
+	{
+		//1ラインを避けて黒で塗りつぶす
+		ctx_mask.fillStyle   = "#000";
+		ctx_mask.strokeStyle = "#000";
+		ctx_mask.lineWidth   = 1;
+		ctx_mask.beginPath();
+		ctx_mask.fillRect(x + 1,0,ANIMATION_NUM-1,sc_h);
+		ctx_mask.closePath();
+	    ctx_mask.fill();
+	}
+	
+	//マスクの最初の表示位置を初期化
+	g_X = sc_w2 + mask_w / 2;
+
+}
+
+function draw_anime()
+{
+	//スリットアニメーションの描画処理	
+	let screen      = document.getElementById("game-screen");	//描画先canvas
+	let slit_canvas = document.getElementById("slit-canvas");	//スリットアニメ用canvas
+	let slit_mask   = document.getElementById("slit-mask");		//スリットマスク用canvas
+	
+	//毎ターンの画面クリア
+	let ctx = screen.getContext("2d");
+	ctx.clearRect(0,0,screen.width,screen.height);
+	
+	//スリットアニメを配置
+	ctx.drawImage(slit_canvas,0,0);
+	
+	//スリットマスクを配置
+	ctx.drawImage(slit_mask,g_X,0);
+	
+	//マスクの位置を更新
+	g_cnt++;
+	if((g_cnt % g_wait) == 0)
+	{
+		//位置更新
+		g_X--;
+	}
+	if(g_cnt >= (g_anime_width * g_wait))
+	{
+		//ループで初期化
+		g_cnt = 0;
+		g_X   = (screen.width / 2) + (g_mask_width / 2);
+	}
+	
+}
+
+function render_game()
+{
+	
+	//ゲームの描画処理
+	
+	//スリットアニメ描画
+	draw_anime();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render_game);
+
+}
+
+</script>
+</head>
+<body onload="init_game()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+	<canvas id="slit-canvas"></canvas>
+	<canvas id="slit-work"></canvas>
+	<canvas id="slit-mask"></canvas>
+</body>
+</html>
