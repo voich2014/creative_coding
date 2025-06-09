@@ -86,6 +86,7 @@ creative_coding/
  - 043.`cube`：[パパののびるCube](https://voich2014.github.io/creative_coding/src/cube/index4.html)
  - 044.`tortun`：[パパのトーラストンネル](https://voich2014.github.io/creative_coding/src/tortun/index3.html)
  - 045.`slit`：[パパのスリットアニメ](https://voich2014.github.io/creative_coding/src/slit/index1.html)
+ - 046.`wire2`：[パパのぐるぐる正方形](https://voich2014.github.io/creative_coding/src/wire2/index5.html)
 
 ---
 
