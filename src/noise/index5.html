@@ -1,0 +1,1507 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのノイズ練習5</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	
+	このデモは、パーリンノイズを使っての図形描画の練習になります。
+	
+	今回は、こちらのサイトのサンプルを参考にしました。
+	ありがとうございます。
+	https://thebookofshaders.com/edit.php#13/ridge.frag
+	
+	ここで実装するJavaScriptのクラスはぼいちが個人的に利用する
+	目的で移植したものなので、汎用的なライブラリを意識したもの
+	では無いため、ご利用は自己責任でお願いします。
+	
+	(C)2020 ぼいち(@voich2014)
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: white;
+		color: #000;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #000;
+		bottom:0px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+	
+	#title
+	{
+		position:absolute;
+	}
+	
+	#noise_texture
+	{
+		position:absolute;
+	}
+	
+	.slider
+	{
+		position:absolute;
+		width: 270px;
+		z-index: 100;
+	}
+	
+	.slider_value
+	{
+		position:absolute;
+	}
+
+-->
+</style>
+
+<!-- 自前ライブラリ群 -->
+<script type="text/javascript">
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function max(a,b)
+{
+	//大きい方を返す
+	return Math.max(a,b);
+}
+
+function min(a,b)
+{
+	//小さい方を返す
+	return Math.min(a,b);
+}
+
+function lerpColor(col1,col2,x)
+{
+	let c = 
+	{
+		r: col1.r + x * (col2.r -col1.r),
+		g: col1.g + x * (col2.g -col1.g),
+		b: col1.b + x * (col2.b -col1.b),
+	};
+	return c;
+}
+
+function hsl2rgb(h,s,l)
+{
+	//HSLからRGBに変換
+	//
+	//  h(hue)       : 色相  0-359の値[度]
+	//  s(saturation): 彩度  0-1.0の値[%]
+	//  l(lightness) : 明度  0-1.0の値[%]
+	//
+	let max,min;
+	let r,g,b;
+	
+	//念のためHを補正
+	h = h % 360;
+
+	if(l < 0.5)
+	{
+		max = 255 * (l + l * (s / 1.0));
+		min  = 255 * (l - l * (s / 1.0));
+	}
+	else
+	{
+		max = 255 * (l + (1.0 - l) * (s / 1.0));
+		min = 255 * (l - (1.0 - l) * (s / 1.0)); 
+	}
+	 
+	if(h < 60)
+	{
+		r = max;
+		g = min + (max - min) * (h / 60);
+		b = min;
+	}
+	else if((h >= 60) && (h < 120))
+	{
+		r = min + (max - min) * ((120 - h) / 60);
+		g = max;
+		b = min;
+	 }
+	 else if((h >= 120) && (h < 180))
+	 {
+		r = min;
+		g = max;
+		b = min + (max - min) * ((h - 120) / 60);        
+	}
+	else if((h >= 180) && (h < 240))
+	{
+		r = min;
+		g = min + (max - min) * ((240 - h) / 60);
+		b = max;
+	}
+	else if((h >= 240) && (h < 300))
+	{
+		r = min + (max - min) * ((h - 240) / 60);
+		g = min;
+		b = max;
+	}
+	else if((h >= 300) && (h < 360))
+	{
+		r = max;
+		g = min;
+		b = min + (max - min) * ((360 - h) / 60); 
+	}
+
+	r =  Math.round(r);
+	g =  Math.round(g);
+	b =  Math.round(b);
+	
+	return { r:r/255, g: g/255, b: b/255 };
+}
+
+//パーリンノイズクラス
+//https://gist.github.com/Flafla2/f0260a861be0ebdeef76
+//↑のC#のソースを参考に雑に移植しています。
+//ご利用は自己責任でお願いします。
+class Perlin
+{
+	//コンストラクタ
+	constructor(repeat = -1)
+	{
+		//メンバの初期化
+		this.repeat = repeat;
+		
+		const permutation =
+		[
+			151,160,137,91,90,15,															// Hash lookup table as defined by Ken Perlin.  This is a randomly
+			131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,	// arranged array of all numbers from 0-255 inclusive.
+			190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
+			88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
+			77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
+			102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
+			135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
+			5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
+			223,183,170,213,119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,9,
+			129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,104,218,246,97,228,
+			251,34,242,193,238,210,144,12,191,179,162,241, 81,51,145,235,249,14,239,107,
+			49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
+			138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
+		];
+		
+		this.p = new Int32Array(512);
+		for(let x = 0;x < 512;x++)
+		{
+			this.p[x] = permutation[x%256];
+		}
+	}
+	
+	inc(num)
+	{
+		num++;
+		if(this.repeat > 0){ num %= this.repeat; }
+		return num;
+	}
+	
+	grad(hash,x,y,z)
+	{
+		 switch(hash & 0xF)
+	    {
+	        case 0x0: return  x + y;
+	        case 0x1: return -x + y;
+	        case 0x2: return  x - y;
+	        case 0x3: return -x - y;
+	        case 0x4: return  x + z;
+	        case 0x5: return -x + z;
+	        case 0x6: return  x - z;
+	        case 0x7: return -x - z;
+	        case 0x8: return  y + z;
+	        case 0x9: return -y + z;
+	        case 0xA: return  y - z;
+	        case 0xB: return -y - z;
+	        case 0xC: return  y + x;
+	        case 0xD: return -y + z;
+	        case 0xE: return  y - x;
+	        case 0xF: return -y - z;
+	        default: return 0; // never happens
+	    }
+	}
+	
+	fade(t)
+	{
+		// Fade function as defined by Ken Perlin.  This eases coordinate values
+		// so that they will "ease" towards integral values.  This ends up smoothing
+		// the final output.
+		return t * t * t * (t * (t * 6 - 15) + 10);		// 6t^5 - 15t^4 + 10t^3
+	}
+	
+	lerp(a,b,x)
+	{
+		return a + x * (b - a);
+	}
+	
+	//パーリンノイズ取得(0.0～1.0の値が返ります)
+	perlin(x,y,z)
+	{
+		if(this.repeat > 0)
+		{
+			// If we have any repeat on, 
+			// change the coordinates to their "local" repetitions
+			x = x % this.repeat;
+			y = y % this.repeat;
+			z = z % this.repeat;
+		}
+		
+		const xi = Math.floor(x) & 255;		// Calculate the "unit cube" that the point asked will be located in
+		const yi = Math.floor(y) & 255;		// The left bound is ( |_x_|,|_y_|,|_z_| ) and the right bound is that
+		const zi = Math.floor(z) & 255;		// plus 1.  Next we calculate the location (from 0.0 to 1.0) in that cube.
+		const xf = x - Math.floor(x);		// We also fade the location to smooth the result.
+		const yf = y - Math.floor(y);
+		const zf = z - Math.floor(z);
+		const  u = this.fade(xf);
+		const  v = this.fade(yf);
+		const  w = this.fade(zf);
+															
+		const aaa = this.p[this.p[this.p[         xi ]+         yi ]+         zi ];
+		const aba = this.p[this.p[this.p[         xi ]+this.inc(yi)]+         zi ];
+		const aab = this.p[this.p[this.p[         xi ]+         yi ]+this.inc(zi)];
+		const abb = this.p[this.p[this.p[         xi ]+this.inc(yi)]+this.inc(zi)];
+		const baa = this.p[this.p[this.p[this.inc(xi)]+         yi ]+         zi ];
+		const bba = this.p[this.p[this.p[this.inc(xi)]+this.inc(yi)]+         zi ];
+		const bab = this.p[this.p[this.p[this.inc(xi)]+         yi ]+this.inc(zi)];
+		const bbb = this.p[this.p[this.p[this.inc(xi)]+this.inc(yi)]+this.inc(zi)];
+	
+		let x1 = this.lerp(this.grad(aaa, xf  , yf  , zf),	// The gradient function calculates the dot product between a pseudorandom
+						   this.grad(baa, xf-1, yf  , zf),	// gradient vector and the vector from the input coordinate to the 8
+						   u);								// surrounding points in its unit cube.
+		let x2 = this.lerp(this.grad(aba, xf  , yf-1, zf),	// This is all then lerped together as a sort of weighted average based on the faded (u,v,w)
+						   this.grad(bba, xf-1, yf-1, zf),	// values we made earlier.
+						   u);
+		let y1 = this.lerp(x1, x2, v);
+
+		x1 = this.lerp(this.grad(aab, xf  , yf  , zf-1),
+					   this.grad(bab, xf-1, yf  , zf-1),
+					   u);
+		x2 = this.lerp(this.grad(abb, xf  , yf-1, zf-1),
+		          	   this.grad(bbb, xf-1, yf-1, zf-1),
+		          	   u);
+		let y2 = this.lerp(x1, x2, v);
+		
+		return (this.lerp(y1, y2, w)+1)/2;	// For convenience we bound it to 0 - 1 (theoretical min/max before is -1 - 1)
+	}
+	
+	octavePerlin(x,y,z,octaves,persistence)
+	{
+		let total     = 0;
+		let frequency = 1;
+		let amplitude = 1;
+		let maxValue  = 0;	// Used for normalizing result to 0.0 - 1.0
+		for(let i=0;i<octaves;i++)
+		{
+			total += this.perlin(x * frequency, y * frequency, z * frequency) * amplitude;
+			
+			maxValue += amplitude;
+			
+			amplitude *= persistence;
+			frequency *= 2;
+		}
+		
+		return total/maxValue;
+	}
+	
+}
+
+//疑似シェーダ関数クラス
+//https://www.khronos.org/registry/OpenGL-Refpages/gl4/
+//https://yrlab.zatunen.com/webgl/noise/noise.html
+//これらのサイトを参考にシェーダ内で利用できる関数を
+//模倣したものです。
+//ご利用は自己責任でお願いします。
+class SL
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static sin(a)
+	{
+		return Math.sin(a);
+	}
+	
+	static cos(a)
+	{
+		return Math.cos(a);
+	}
+	
+	static tan(a)
+	{
+		return Math.tan(a);
+	}
+	
+	static fract(f)
+	{
+		return f - Math.floor(f);
+	}
+	
+	static dot2(a,b,c,d)
+	{
+		return a*c+b*d;
+	}
+	
+	static dot3(a,b)
+	{
+		return a.x*b.x + a.y*b.y + a.z*b.z;
+	}
+	
+	static random(x,y)
+	{
+		//0.0 ～ 1.0の乱数を返す
+		return this.fract(this.sin(this.dot2(x,y,12.9898,78.233)) * 43758.5453);
+	}
+	
+	static random2(x,y)
+	{
+		return { x: this.random(x,y), y: this.random(x + 0.5,y + 0.5) };
+	}
+	
+	static interpolation(f)
+	{
+		// 0.0 ～ 1.0の補間式、5次のものがアーティファクト少なくていいらしい
+		//return f * f * (3.0 - 2.0 * f);
+		return f * f * f * (f * (6.0 * f - 15.0) + 10.0);
+	}
+	
+	static clamp(x,a,b)
+	{
+		return Math.max(a,Math.min(b,x));
+	}
+	
+	static length(x,y)
+	{
+		return Math.sqrt(x*x+y*y);
+	}
+	
+	static mix(x,y,a)
+	{
+		return x * (1.0 - a) + y * a;
+	}
+	
+	static mixCol(col1,col2,a)
+	{
+		//r,g,bは0.0～1.0
+		
+		const aa  = 1.0 - a;
+		const col =
+		{
+			r: col1.r * aa + col2.r * a,
+			g: col1.g * aa + col2.g * a,
+			b: col1.b * aa + col2.b * a
+		};
+		
+		return col;
+	}
+	
+	static rotate2d(angle,x,y)
+	{
+		//Z軸回転
+		const rx =  x * Math.cos(angle) + y * Math.sin(angle);
+		const ry = -x * Math.sin(angle) + y * Math.cos(angle);
+		return { x:rx,y:ry };
+	}
+	
+	static smoothstep(edge0,edge1,x)
+	{
+		//Wikipediaより
+	    // Scale, bias and saturate x to 0..1 range
+	    x = this.clamp((x - edge0) / (edge1 - edge0),0.0,1.0);
+	    // Evaluate polynomial
+	    return x*x*(3-2*x);
+	}
+}
+
+//ブロックノイズクラス
+//https://yrlab.zatunen.com/webgl/noise/noise.html
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class BlockNoise
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static noise(x,y)
+	{
+		const xx = Math.floor(x * 8.0);
+		const yy = Math.floor(y * 8.0);
+		return SL.random(xx,yy);
+	}
+	
+}
+
+//バリューノイズクラス
+//https://yrlab.zatunen.com/webgl/noise/noise.html
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class ValueNoise
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static noise(x,y)
+	{
+		const ix = Math.floor(x * 8.0);
+		const iy = Math.floor(y * 8.0);
+		const fx = SL.fract(x * 8.0);
+		const fy = SL.fract(y * 8.0);
+		const f1 = SL.random(ix      ,iy      );
+		const f2 = SL.random(ix + 1.0,iy      );
+		const f3 = SL.random(ix      ,iy + 1.0);
+		const f4 = SL.random(ix + 1.0,iy + 1.0);
+		
+		return SL.mix(SL.mix(f1,f2,SL.interpolation(fx)),
+					  SL.mix(f3,f4,SL.interpolation(fx)),
+					  SL.interpolation(fy));
+	}
+	
+}
+
+//セルラーノイズクラス
+//https://yrlab.zatunen.com/webgl/noise/noise.html
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class CellularNoise
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static noise(x,y)
+	{
+		const ix = Math.floor(x * 8.0);
+		const iy = Math.floor(y * 8.0);
+		const fx = SL.fract(x * 8.0);
+		const fy = SL.fract(y * 8.0);
+		
+		let o = 1.0;
+		for(let yy = -1;yy <= 1;++yy)
+		{
+			for(let xx = -1;xx <= 1;++xx)
+			{
+				let r  = SL.random2(ix + xx,iy + yy);
+				let r2 = SL.random2(r.x,r.y);
+				r.x   += (r2.x * 2.0 - 1.0) * 0.5;
+				r.y   += (r2.y * 2.0 - 1.0) * 0.5;
+				r.x    = Math.max(Math.min(r.x,1.0),0.0);
+				r.y    = Math.max(Math.min(r.y,1.0),0.0);
+				o      = Math.min(SL.length(fx - (xx + r.x),fy - (yy + r.y)),o);
+			}
+		}
+		
+		o = Math.min(Math.pow(o * 1.0,3.0),1.0);	//値の勾配を調整
+		
+		return o
+	}
+	
+}
+
+//反転セルラーノイズクラス
+//https://yrlab.zatunen.com/webgl/noise/noise.html
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class InverseCellularNoise
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static noise(x,y)
+	{
+		return 1.0 - CellularNoise.noise(x,y);
+	}
+	
+}
+
+//ドメインワーピングクラス
+//https://qiita.com/edo_m18/items/e4d7a084cdbbfdc7863c
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class DomainWarping
+{
+	//コンストラクタ
+	constructor()
+	{
+		//メンバの初期化
+		this.pn        = new Perlin();
+		this.noise     = this.perlin_noise;
+		this.octaves   = 5;
+		this.gain      = 0.5;
+		this.mixColor1 = { r:0.8,g:0.35,b:0.12 };
+		this.mixColor2 = { r:0.3,g:0.75,b:0.69 };
+	}
+	
+	setNoiseFunc(fn)
+	{
+		this.noise = fn;
+	}
+	
+	setOctaves(o)
+	{
+		this.octaves = o;
+	}
+	
+	setGain(g)
+	{
+		this.gain = g;
+	}
+	
+	setMixColor1(color)
+	{
+		this.mixColor1.r = color.r;
+		this.mixColor1.g = color.g;
+		this.mixColor1.b = color.b;
+	}
+	
+	setMixColor2(color)
+	{
+		this.mixColor2.r = color.r;
+		this.mixColor2.g = color.g;
+		this.mixColor2.b = color.b;
+	}
+	
+	perlin_noise(x,y)
+	{
+		return this.pn.perlin(x,y,0);
+	}
+	
+	fbm(x,y)
+	{
+		let v = 0.0;
+		let a = 0.5;
+		
+		for(let i = 0;i < this.octaves;++i)
+		{
+			v += a * this.noise(x,y);
+			x *= 2.0;
+			y *= 2.0;
+			a *= this.gain;
+		}
+		
+		return v;
+	}
+	
+	getColor(x,y,t)
+	{
+		//x,y は 0.0 ～ 1.0
+		
+		let color = { r:0.0,g:0.0,b:0.0 };
+		
+		let q = { x:0,y:0 };
+		q.x = this.fbm(x,y);
+		q.y = this.fbm(x + 1.0,y + 1.0);
+		
+		//1.7や9.2は任意の数値です。特別な意味はないです。
+    	let r = { x:0,y:0 };
+    	const add_qx  = (4.0 * q.x);
+    	const add_qy  = (4.0 * q.y);
+    	const add_rxt = (0.15 * t);
+    	const add_ryt = (0.12 * t);
+    	const add_rx1 = add_qx + 1.7 + add_rxt;
+    	const add_rx2 = add_qy + 9.2 + add_rxt;
+    	const add_ry1 = add_qx + 8.3 + add_ryt;
+    	const add_ry2 = add_qy + 2.8 + add_ryt;
+	    r.x = this.fbm(x + add_rx1,y + add_rx2);
+    	r.y = this.fbm(x + add_ry1,y + add_ry2);
+
+		color = SL.mixCol(color,this.mixColor1,SL.clamp(SL.length(q.x,q.y),0.0,1.0));
+	    color = SL.mixCol(color,this.mixColor2,SL.clamp(SL.length(r.x,r.y),0.0,1.0));
+
+		const add_rx = (4.0 * r.x);
+    	const add_ry = (4.0 * r.y);
+    	const f      = this.fbm(x + add_rx,y + add_ry);
+		
+		// f^3 + 0.6f^2 + 0.5f
+	    const coef = (f * f * f + (0.6 * f * f) + (0.5 * f));
+    	color.r = SL.clamp(color.r * coef,0.0,1.0);
+		color.g = SL.clamp(color.g * coef,0.0,1.0);
+		color.b = SL.clamp(color.b * coef,0.0,1.0);
+
+		return color;
+	}
+
+}
+
+//ウッドテクスチャクラス
+//https://thebookofshaders.com/edit.php#11/wood.frag
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class WoodTexture
+{
+	//コンストラクタ
+	constructor()
+	{
+		//メンバの初期化
+		this.pn        = new Perlin();
+		this.mp        = { x:3.0,y:10.0 }; 
+		this.lp        = 0.5;
+		this.baseColor = { r:1.0,g:1.0,b:1.0 };
+	}
+	
+	setMultiParam(x,y)
+	{
+		this.mp.x = x;
+		this.mp.y = y;
+	}
+	
+	setLineParam(l)
+	{
+		this.lp = l;
+	}
+	
+	setBaseColor(color)
+	{
+		this.baseColor.r = color.r;
+		this.baseColor.g = color.g;
+		this.baseColor.b = color.b;
+	}
+	
+	lines(x,y,b)
+	{
+		const scale = 10.0;
+		x *= scale;
+		y *= scale;
+		return SL.smoothstep(0.0,0.5+b*0.5,
+							 Math.abs((Math.sin(x*3.1415)+b*2.0))*0.5);
+	}
+	
+	getColor(x,y,t)
+	{
+		//x,y は 0.0 ～ 1.0
+		
+		let pos = { x:x * this.mp.x,y:y * this.mp.y };
+		
+		//Add noise
+		pos = SL.rotate2d(this.pn.perlin(pos.x,pos.y,t),pos.x,pos.y);
+		
+		//Draw lines
+		const pattern = this.lines(pos.x,pos.y,this.lp);
+		
+		const color =
+		{
+			r: this.baseColor.r * pattern,
+			g: this.baseColor.g * pattern,
+			b: this.baseColor.b * pattern
+		};
+
+		return color;
+	}
+
+}
+
+//リッジ(尾根)テクスチャクラス
+//https://thebookofshaders.com/edit.php#13/ridge.frag
+//↑の記事を参考に実装しています。
+//ご利用は自己責任でお願いします。
+class RidgeTexture
+{
+	//コンストラクタ
+	constructor()
+	{
+		//メンバの初期化
+		this.pn        = new Perlin();
+		this.gain      = 0.5;
+		this.offset    = 0.9;
+		this.octaves   = 4;
+		this.baseColor = { r:1.0,g:1.0,b:1.0 };
+	}
+	
+	setGain(g)
+	{
+		this.gain = g;
+	}
+	
+	setOffset(o)
+	{
+		this.offset = o;
+	}
+	
+	setOctaves(o)
+	{
+		this.octaves = o;
+	}
+	
+	setBaseColor(color)
+	{
+		this.baseColor.r = color.r;
+		this.baseColor.g = color.g;
+		this.baseColor.b = color.b;
+	}
+
+// 失敗した…
+//	mod289_3d(x,y,z)
+//	{
+//		const xx = x - Math.floor(x * (1.0 / 289.0)) * 289.0;
+//		const yy = y - Math.floor(y * (1.0 / 289.0)) * 289.0;
+//		const zz = z - Math.floor(z * (1.0 / 289.0)) * 289.0;
+//		return { x:xx,y:yy,z:zz };
+//	}
+//	
+//	mod289_2d(x,y)
+//	{
+//		const xx = x - Math.floor(x * (1.0 / 289.0)) * 289.0;
+//		const yy = y - Math.floor(y * (1.0 / 289.0)) * 289.0;
+//		return { x:xx,y:yy };
+//	}
+//	
+//	permute(x,y,z)
+//	{
+//		return this.mod289_3d(((x*34.0)+1.0)*x,
+//							  ((y*34.0)+1.0)*y,
+//							  ((z*34.0)+1.0)*z);
+//	}
+//	
+//	snoise(xx,yy)
+//	{
+//		const C =
+//		{
+//			x:  0.211324865405187,	// (3.0-sqrt(3.0))/6.0
+//			y:  0.366025403784439,	//  0.5*(sqrt(3.0)-1.0)
+//			z: -0.577350269189626,	// -1.0 + 2.0 * C.x
+//			w:  0.024390243902439	//  1.0 / 41.0
+//		};
+//		
+//		 // First corner (x0)
+//	    let i  = { x: Math.floor(xx + SL.dot2(xx,yy,C.y,C.y)),
+//	    	       y: Math.floor(yy + SL.dot2(xx,yy,C.y,C.y)) };
+//	    let x0 = { x: xx - i.x + SL.dot2(i.x,i.y,C.x,C.x),
+//	    		   y: yy - i.y + SL.dot2(i.x,i.y,C.x,C.x) };
+//		
+//		// Other two corners (x1, x2)
+//	    let i1 = { x: 0,y: 0 };
+//	    i1 = (x0.x > x0.y) ? { x: 1.0,y: 0.0 } : { x: 0.0,y: 1.0 };
+//	    let x1 = { x: x0.x + C.x - i1.x,
+//	    		   y: x0.y + C.x - i1.y };
+//	    let x2 = { x: x0.x + C.z,
+//	    		   y: x0.y + C.z };
+//		
+//		// Do some permutations to avoid
+//	    // truncation effects in permutation
+//	    i = this.mod289_2d(i.x,i.y);
+//	    let p0 = this.permute(i.y + 0.0,i.y + i1.y,i.y + 1.0);
+//	    let p1 = { x: i.x + 0.0,y: i.y + i1.x,z: i.x + 1.0 };
+//	    let p  = this.permute(p0.x+p1.x,p0.y+p1.y,p0.z+p1.z);
+//
+//		let m = 
+//		{
+//			x: Math.max(0.5 - SL.dot2(x0.x,x0.y,x0.x,x0.y),0.0),
+//			y: Math.max(0.5 - SL.dot2(x1.x,x1.y,x1.x,x1.y),0.0),
+//			z: Math.max(0.5 - SL.dot2(x2.x,x2.y,x2.x,x2.y),0.0)
+//		};
+//
+//	    m = 
+//	    {
+//	    	x: m.x*m.x*m.x,
+//	    	y: m.y*m.y*m.y,
+//	    	z: m.z*m.z*m.z
+//	    };
+//	    
+//	    // Gradients:
+//	    //  41 pts uniformly over a line, mapped onto a diamond
+//	    //  The ring size 17*17 = 289 is close to a multiple
+//	    //      of 41 (41*7 = 287)
+//
+//	    let x =
+//	    {
+//	    	x: 2.0 * SL.fract(p.x * C.w) - 1.0,
+//	    	y: 2.0 * SL.fract(p.y * C.w) - 1.0,
+//	    	z: 2.0 * SL.fract(p.z * C.w) - 1.0
+//	    };
+//	    let h =
+//	    {
+//	    	x: Math.abs(x.x) - 0.5,
+//	    	y: Math.abs(x.y) - 0.5,
+//	    	z: Math.abs(x.z) - 0.5
+//	    };
+//	    let ox =
+//	    {
+//	    	x: Math.floor(x.x + 0.5),
+//	    	y: Math.floor(x.y + 0.5),
+//	    	z: Math.floor(x.z + 0.5)
+//	    };
+//	    let a0 =
+//	    {
+//	    	x: x.x - ox.x,
+//	    	y: x.y - ox.y,
+//	    	z: x.z - ox.z
+//	    };
+//	    
+//	    // Normalise gradients implicitly by scaling m
+//	    // Approximation of: m *= inversesqrt(a0*a0 + h*h);
+//	    m = 
+//	    {
+//	    	x: m.x * 1.79284291400159 - 0.85373472095314 * (a0.x*a0.x+h.x*h.x),
+//	    	y: m.y * 1.79284291400159 - 0.85373472095314 * (a0.y*a0.y+h.y*h.y),
+//	    	z: m.z * 1.79284291400159 - 0.85373472095314 * (a0.z*a0.z+h.z*h.z)
+//	    };
+//	    
+//	    // Compute final noise value at P
+//	    let g =
+//	    {
+//	    	x: a0.x * x0.x + h.x * x0.y,
+//	    	y: a0.y * x1.x + h.y * x1.y,
+//	    	z: a0.z * x2.x + h.z * x2.y
+//	    };
+//	    
+//	    return 130.0 * SL.dot3(m,g);
+//	}
+
+	ridge(h,offset)
+	{
+		h = Math.abs(h);
+		h = offset - h;
+		h = h * h;
+		return h;	
+	}
+	
+	getColor(x,y,t)
+	{
+		//x,y は 0.0 ～ 1.0
+		
+		const lacunarity = 2.0;
+		const gain       = this.gain;
+		const offset     = this.offset;
+		const octaves    = this.octaves;
+		
+		let sum  = 0.0;
+		let freq = 1.0;
+		let amp  = 0.5;
+		let prev = 1.0;
+		for(let i = 0;i < octaves;++i)
+		{
+			//let n = this.ridge(this.snoise(x,y),offset);	//失敗した
+			let n = this.ridge(g_pn.perlin(x,y,t),offset);
+			sum  += n * amp;
+			sum  += n * amp * prev;
+			prev  = n;
+			freq *= lacunarity;
+			amp  *= gain;
+		}
+		
+		const color =
+		{
+			r: SL.clamp(this.baseColor.r * sum,0.0,1.0),
+			g: SL.clamp(this.baseColor.g * sum,0.0,1.0),
+			b: SL.clamp(this.baseColor.b * sum,0.0,1.0)
+		};
+
+		return color;
+	}
+
+}
+
+//イージング関数クラス
+//https://easings.net/ja#
+//↑のソースを参考に雑に移植しています。
+//ご利用は自己責任でお願いします。
+class Ease
+{
+	//コンストラクタ
+	constructor()
+	{
+	}
+	
+	static easeInSine(x)
+	{
+		return 1 - Math.cos((x * Math.PI) / 2);
+	}
+
+	static easeOutSine(x)
+	{
+		return Math.sin((x * Math.PI) / 2);
+	}
+
+	static easeInOutSine(x)
+	{
+		return -(Math.cos(Math.PI * x) - 1) / 2;
+	}
+	
+	static easeInQuad(x)
+	{
+		return x * x;
+	}
+
+	static easeOutQuad(x)
+	{
+		return 1 - (1 - x) * (1 - x);
+	}
+
+	static easeInOutQuad(x)
+	{
+		return (x < 0.5) ? (2 * x * x) : (1 - Math.pow(-2 * x + 2, 2) / 2);
+	}
+
+	static easeInCubic(x)
+	{
+		return x * x * x;
+	}
+
+	static easeOutCubic(x)
+	{
+		return 1 - Math.pow(1 - x, 3);
+	}
+
+	static easeInOutCubic(x)
+	{
+		return (x < 0.5) ? (4 * x * x * x) : (1 - Math.pow(-2 * x + 2, 3) / 2);
+	}
+
+	static easeInQuart(x)
+	{
+		return x * x * x * x;
+	}
+
+	static easeOutQuart(x)
+	{
+		return 1 - Math.pow(1 - x, 4);
+	}
+
+	static easeInOutQuart(x)
+	{
+		return (x < 0.5) ? (8 * x * x * x * x) : (1 - Math.pow(-2 * x + 2, 4) / 2);
+	}
+
+	static easeInQuint(x)
+	{
+		return x * x * x * x * x;
+	}
+
+	static easeOutQuint(x)
+	{
+		return 1 - Math.pow(1 - x, 5);
+	}
+
+	static easeInOutQuint(x)
+	{
+		return (x < 0.5) ? (16 * x * x * x * x * x) : (1 - Math.pow(-2 * x + 2, 5) / 2);
+	}
+
+	static easeInExpo(x)
+	{
+		return (x === 0) ? 0 : Math.pow(2, 10 * x - 10);
+	}
+
+	static easeOutExpo(x)
+	{
+		return (x === 1) ? 1 : (1 - Math.pow(2, -10 * x));
+	}
+
+	static easeInOutExpo(x)
+	{
+		return (x === 0)
+  			    ? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : ((x < 0.5)
+  				        ? (Math.pow(2, 20 * x - 10) / 2)
+  				        : ((2 - Math.pow(2, -20 * x + 10)) / 2)
+  				      )
+  				  );
+	}
+
+	static easeInCirc(x)
+	{
+		return 1 - Math.sqrt(1 - Math.pow(x, 2));
+	}
+
+	static easeOutCirc(x)
+	{
+		return Math.sqrt(1 - Math.pow(x - 1, 2));
+	}
+
+	static easeInOutCirc(x)
+	{
+		return (x < 0.5)
+  				? ((1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2)
+  				: ((Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2);
+	}
+
+	static easeInBack(x)
+	{
+		const c1 = 1.70158;
+		const c3 = c1 + 1;
+
+		return c3 * x * x * x - c1 * x * x;
+	}
+
+	static easeOutBack(x)
+	{
+		const c1 = 1.70158;
+		const c3 = c1 + 1;
+
+		return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+	}
+
+	static easeInOutBack(x)
+	{
+		const c1 = 1.70158;
+		const c2 = c1 * 1.525;
+
+		return (x < 0.5)
+  				? ((Math.pow(2 * x, 2) * ((c2 + 1) * 2 * x - c2)) / 2)
+  				: ((Math.pow(2 * x - 2, 2) * ((c2 + 1) * (x * 2 - 2) + c2) + 2) / 2);
+	}
+
+	static easeInElastic(x)
+	{
+		const c4 = (2 * Math.PI) / 3;
+
+		return (x === 0)
+  				? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : (-Math.pow(2, 10 * x - 10) * Math.sin((x * 10 - 10.75) * c4))
+  				  );
+	}
+
+	static easeOutElastic(x)
+	{
+		const c4 = (2 * Math.PI) / 3;
+
+		return (x === 0)
+  				? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : (Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * c4) + 1)
+  				  );
+	}
+
+	static easeInOutElastic(x)
+	{
+		const c5 = (2 * Math.PI) / 4.5;
+
+		return (x === 0)
+  				? 0
+  				: ((x === 1)
+  				    ? 1
+  				    : ((x < 0.5)
+  				 	    ? (-(Math.pow(2, 20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2)
+  					    : ((Math.pow(2, -20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1)
+  					  )
+  				  );
+	}
+
+	static easeInBounce(x)
+	{
+		return 1 - Ease.easeOutBounce(1 - x);
+	}
+
+	static easeOutBounce(x)
+	{
+		const n1 = 7.5625;
+		const d1 = 2.75;
+
+		if (x < 1 / d1) {
+		    return n1 * x * x;
+		} else if (x < 2 / d1) {
+		    return n1 * (x -= 1.5 / d1) * x + 0.75;
+		} else if (x < 2.5 / d1) {
+		    return n1 * (x -= 2.25 / d1) * x + 0.9375;
+		} else {
+		    return n1 * (x -= 2.625 / d1) * x + 0.984375;
+		}
+	}
+
+	static easeInOutBounce(x)
+	{
+		return (x < 0.5)
+  				? ((1 - Ease.easeOutBounce(1 - 2 * x)) / 2)
+  				: ((1 + Ease.easeOutBounce(2 * x - 1)) / 2);
+	}
+	
+}
+
+
+
+//グローバルオブジェクト
+let g_game_width    = 320;
+let g_game_height   = 500;
+
+let g_pn     = new Perlin();			//パーリンノイズ生成用
+let g_rt     = new RidgeTexture();		//尾根テクスチャ生成用
+let g_time   = 0;						//現在時刻[ms]
+let g_dtime  = 0;						//前回の描画からの経過時間[ms]
+
+const MORPH_TIME    = 5000;
+
+let g_xystep        = 1;
+let g_timestep      = 1;
+let g_octave        = 1;
+let g_gain          = 1;
+let g_offset        = 1;
+let g_start_time    = 0;
+let g_next_time     = 0;
+let g_ease          = null;
+
+let g_last_fps_time = 0;
+let g_fps_count     = 0;
+let g_fps           = 60;
+let g_fps_list      = [];
+
+let g_cnt = 0;
+
+function init()
+{
+	
+	//初期化処理
+	
+	//準備
+	setup();
+	
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	let requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render);
+	
+}
+
+function adjust_screen()
+{
+
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	let window_w = window.innerWidth;
+	let window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 460;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	let screen  = document.getElementById("game-screen");
+	let game_x  = (window_w - g_game_width)  / 2;
+	let game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+	//オフスクリーン用のImageDataを作成
+	//let ctx = screen.getContext("2d");
+	//g_offsc = ctx.createImageData(g_game_width,g_game_height);
+	
+}
+
+function setup_obj()
+{
+
+	//オブジェクトの準備
+
+	const win_w = window.innerWidth;
+	const win_h = window.innerHeight;
+	const sc_w  = g_game_width;
+	const sc_h  = g_game_height;
+	const sc_w2 = sc_w / 2;
+	const sc_h2 = sc_h / 2;
+	const sc_x  = (win_w - g_game_width)  / 2;
+	const sc_y  = (win_h - g_game_height) / 2;
+	
+	//ノイズの2次元テクスチャを生成
+	const tex_cv  = document.getElementById("noise_texture");
+	const tex_ctx = tex_cv.getContext("2d");
+	const tex_w   = 256;
+	const tex_h   = 256;
+	const tex_x   = (win_w - tex_w) / 2;
+	let   tex_y   = (win_h - g_game_height) / 2;
+	if(tex_y < 25){ tex_y = 25; }
+
+	tex_cv.style.left = tex_x+"px";
+	tex_cv.style.top  = tex_y+"px";
+	tex_cv.width      = tex_w;
+	tex_cv.height     = tex_h;
+	
+	//タイトルの位置合わせ
+	let title = document.getElementById("title");
+	title.style.left = (tex_x     ) + "px";
+	title.style.top  = (tex_y - 20) + "px";
+	
+	//スライダーの位置合わせ
+	let slider_s  = document.getElementById("slider_s");
+	let slider_t  = document.getElementById("slider_t");
+	let slider_o  = document.getElementById("slider_o");
+	let slider_g  = document.getElementById("slider_g");
+	let slider_f  = document.getElementById("slider_f");
+	let label_s   = document.getElementById("slider_s_value");
+	let label_t   = document.getElementById("slider_t_value");
+	let label_o   = document.getElementById("slider_o_value");
+	let label_g   = document.getElementById("slider_g_value");
+	let label_f   = document.getElementById("slider_f_value");
+	const slider_area_w = 275;
+	
+	label_s.style.left   = (sc_x  + (sc_w - slider_area_w) / 2) + "px";
+	label_s.style.top    = (tex_y + tex_h +  20) + "px";
+	slider_s.style.left  = (sc_x + (sc_w - slider_area_w) / 2 - 5) + "px";
+	slider_s.style.top   = (tex_y + tex_h +  40) + "px";
+	label_t.style.left   = (sc_x  + (sc_w - slider_area_w) / 2) + "px";
+	label_t.style.top    = (tex_y + tex_h +  60) + "px";
+	slider_t.style.left  = (sc_x + (sc_w - slider_area_w) / 2 - 5) + "px";
+	slider_t.style.top   = (tex_y + tex_h +  80) + "px";
+	label_o.style.left   = (sc_x  + (sc_w - slider_area_w) / 2) + "px";
+	label_o.style.top    = (tex_y + tex_h + 100) + "px";
+	slider_o.style.left  = (sc_x + (sc_w - slider_area_w) / 2 - 5) + "px";
+	slider_o.style.top   = (tex_y + tex_h + 120) + "px";
+	label_g.style.left   = (sc_x  + (sc_w - slider_area_w) / 2) + "px";
+	label_g.style.top    = (tex_y + tex_h + 140) + "px";
+	slider_g.style.left  = (sc_x + (sc_w - slider_area_w) / 2 - 5) + "px";
+	slider_g.style.top   = (tex_y + tex_h + 160) + "px";
+	label_f.style.left   = (sc_x  + (sc_w - slider_area_w) / 2) + "px";
+	label_f.style.top    = (tex_y + tex_h + 180) + "px";
+	slider_f.style.left  = (sc_x + (sc_w - slider_area_w) / 2 - 5) + "px";
+	slider_f.style.top   = (tex_y + tex_h + 200) + "px";
+	
+	update_slide();
+	update_texture();
+	
+}
+
+function setup()
+{
+	
+	//準備
+		
+	//画面調整
+	adjust_screen();
+	
+	//オブジェクトの準備
+	setup_obj();
+
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	let now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS履歴に追加
+		g_fps_list.push(g_fps_count);
+		if(g_fps_list.length > 10)
+		{	
+			//先頭を削除して過去n回分までの
+			//FPSの平均とします(移動平均)
+			g_fps_list.shift();
+		}
+		let fps_ave = 0;
+		for(let i = 0;i < g_fps_list.length;++i)
+		{	fps_ave += g_fps_list[i];	}
+		fps_ave /= g_fps_list.length;
+		
+		//FPS表示
+		let fps_div = document.getElementById("fps");
+		let fps     = (fps_ave*(1000/(now_time - g_last_fps_time)));
+		fps_div.innerText = "FPS:"+fps;
+		g_fps = fps_ave;
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function update_texture()
+{
+	
+	//ノイズテクスチャの更新
+	
+	const tex_cv  = document.getElementById("noise_texture");
+	const tex_ctx = tex_cv.getContext("2d");
+	const tex_w   = tex_cv.width;
+	const tex_h   = tex_cv.height;
+	
+	let offsc = tex_ctx.createImageData(tex_w,tex_h);
+	offsc.data.fill(0);
+	
+	//経過時間決定
+	const timestep = 1.0/g_timestep;
+	const t        = (g_time / 1000) * timestep;
+	const h        = Math.floor(g_time / 100) % 360;
+	
+	//パラメータ設定
+	g_rt.setOctaves(g_octave);
+	g_rt.setGain(g_gain);
+	g_rt.setOffset(g_offset);
+	
+	//色の準備
+	const col = hsl2rgb(h,1.0,0.8);
+	g_rt.setBaseColor(col);
+			
+	const xystep = 1.0 / g_xystep;
+	for(let y = 0;y < tex_h;++y)
+	{
+		const ny = y / tex_h * xystep;
+		for(let x = 0;x < tex_w;++x)
+		{
+			const nx = x / tex_w * xystep;
+
+			//小数点以下の部分で補間するので整数ばかり渡してはダメ
+			const col = g_rt.getColor(nx,ny,t);
+
+			const pos = (tex_w << 2) * y + (x << 2);
+			offsc.data[pos + 0] = col.r * 255;
+			offsc.data[pos + 1] = col.g * 255;
+			offsc.data[pos + 2] = col.b * 255;
+			offsc.data[pos + 3] = 255;
+		}
+	}
+	tex_ctx.putImageData(offsc,0,0);
+
+}
+
+function update_slide()
+{
+
+	//スライダーの値を反映
+	
+	let slider_s = document.getElementById("slider_s");
+	let slider_t = document.getElementById("slider_t");
+	let slider_o = document.getElementById("slider_o");
+	let slider_g = document.getElementById("slider_g");
+	let slider_f = document.getElementById("slider_f");
+	let label_s  = document.getElementById("slider_s_value");
+	let label_t  = document.getElementById("slider_t_value");
+	let label_o  = document.getElementById("slider_o_value");
+	let label_g  = document.getElementById("slider_g_value");
+	let label_f  = document.getElementById("slider_f_value");
+	let val_s    = parseFloat(slider_s.value);
+	let val_t    = parseFloat(slider_t.value);
+	let val_o    = parseFloat(slider_o.value);
+	let val_g    = parseFloat(slider_g.value);
+	let val_f    = parseFloat(slider_f.value);
+	
+	g_xystep   = val_s;
+	g_timestep = val_t;
+	g_octave   = val_o;
+	g_gain     = val_g;
+	g_offset   = val_f;
+	
+	const xystep   = 1.0 / g_xystep;
+	const timestep = 1.0 / g_timestep;
+	const t        = (g_time / 1000) * timestep;
+	
+	label_s.textContent = "xystep:1.0/"   + val_s;
+	label_t.textContent = "timestep:1.0/" + val_t + " t:" + t;
+	label_o.textContent = "octave:"       + val_o;
+	label_g.textContent = "gain:"         + val_g;
+	label_f.textContent = "offset:"       + val_f;
+
+}
+
+function draw()
+{
+
+	//描画コア
+	
+	//開始時刻保存
+	if(g_start_time  == 0)
+	{
+		g_start_time = g_time;
+		g_next_time  = g_time + MORPH_TIME;
+	}
+	
+	update_slide();
+	update_texture();
+	
+	g_cnt++;
+	
+}
+
+function render()
+{
+	
+	//毎ターンの描画処理
+	
+	//時間計算
+	const last_time = g_time;
+	g_time = (new Date).getTime();
+	if(last_time == 0)
+	{	g_dtime = 0;	}
+	else
+	{	g_dtime = g_time - last_time;	}
+	
+	//描画コア
+	draw();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render);
+
+}
+
+</script>
+</head>
+<body onload="init()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+	<span id="title">リッジテクスチャ(失敗)</span>
+	<canvas id="noise_texture"></canvas>
+	<input id="slider_s" class="slider" type="range" value="0.1" min="0.01" max="1" step="0.01"
+     oninput="update_slide()"><span id="slider_s_value" class="slider_value"></span>
+    <input id="slider_t" class="slider" type="range" value="2.5" min="0.1" max="10" step="0.1"
+     oninput="update_slide()"><span id="slider_t_value" class="slider_value"></span>
+    <input id="slider_o" class="slider" type="range" value="5" min="1" max="10" step="1"
+     oninput="update_slide()"><span id="slider_o_value" class="slider_value"></span>
+    <input id="slider_g" class="slider" type="range" value="0.5" min="0.1" max="2" step="0.1"
+     oninput="update_slide()"><span id="slider_g_value" class="slider_value"></span> 
+    <input id="slider_f" class="slider" type="range" value="1.0" min="0.1" max="1.5" step="0.1"
+     oninput="update_slide()"><span id="slider_f_value" class="slider_value"></span> 
+</body>
+</html>
