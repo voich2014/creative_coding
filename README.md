@@ -88,6 +88,7 @@ creative_coding/
  - 045.`slit`：[パパのスリットアニメ](https://voich2014.github.io/creative_coding/src/slit/index1.html)
  - 046.`wire2`：[パパのぐるぐる正方形](https://voich2014.github.io/creative_coding/src/wire2/index5.html)
  - 047.`noise`：[パパのノイズ練習１](https://voich2014.github.io/creative_coding/src/noise/index1.html)
+ - 048.`noise2`：[パパのノイズ練習２](https://voich2014.github.io/creative_coding/src/noise/index2.html)
 
 ---
 
