@@ -1,0 +1,318 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのワイヤーフレームっぽいの</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、neko800(@nekohachi1)さんが公開されたプチコン作品をベースに
+	ぼいち(@voich2014)がJavaScriptに移植したものです。
+	
+	すばらしい作品を公開してくださったneko800さんに圧倒的感謝を！！
+	
+	neko800さんのプチコン4 オリジナル版 https://twitter.com/nekohachi1/status/1196444460868980736
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: black;
+		color: #fff;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:0px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+-->
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+var g_game_width    = 320;
+var g_game_height   = 500;
+
+const g_sprite_num  = 1280;		//全スプライト数
+
+var g_sprite        = [];
+var g_r0            = 0;
+var g_r1            = 1;
+var g_cnt           = 0;
+var g_id            = 0;
+
+var g_last_fps_time = 0;
+var g_fps_count     = 0;
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function max(a,b)
+{
+	//大きい方を返す
+	return Math.max(a,b);
+}
+
+function min(a,b)
+{
+	//小さい方を返す
+	return Math.min(a,b);
+}
+
+function init_game()
+{
+	
+	//ゲームの初期化処理
+	
+	//画面調整
+	adjust_screen();
+	
+	//ゲームに必要なオブジェクトの生成
+	create_obj();
+
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	var requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render_game);
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	var now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS表示
+		var fps_div = document.getElementById("fps");
+		fps_div.innerText = "FPS:"+(g_fps_count*(1000/(now_time - g_last_fps_time)));
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function adjust_screen()
+{
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	var window_w = window.innerWidth;
+	var window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	var screen  = document.getElementById("game-screen");
+	var game_x  = (window_w - g_game_width) / 2;
+	var game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function create_obj()
+{
+	//オブジェクトの生成
+	
+	//スプライトオブジェクト情報の初期化
+	for(var i = 0;i < g_sprite_num;++i)
+	{
+		var obj = { x: 0, y: 0, z: 0, v: 0 };
+		g_sprite.push(obj);
+	}
+
+}
+
+function set_obj_pos()
+{
+	//オブジェクトの位置を決定する
+	
+	if(!(g_cnt & 7))
+	{
+		g_r0 = max(-75,min(75,g_r0+g_r1));
+		
+		var a       = rad(g_r0);
+		var cos_a   = Math.cos(a);
+		var sin_a   = Math.sin(a);
+		var con_cnt = Math.cos(rad(g_cnt));
+		var sin_cnt = Math.sin(rad(g_cnt * 2));
+		
+		for(var i = 0;i < 16;++i)
+		{
+			var f = (!(i % 15) ? 1 : 0);	//左右の端のラインを上に上げるためのフラグ
+			var x = i * 16 - 120 + con_cnt * 32;
+			var y = rnd(4) + 64 - f * 64 + sin_cnt * 8;
+			var z = 2048;
+			
+			var sp = g_sprite[g_id];
+			sp.x = x * cos_a - y * sin_a;
+			sp.y = x * sin_a + y * cos_a;
+			sp.z = z;
+			sp.v = 1;
+			
+			g_id = (g_id + 1) % g_sprite_num;
+		}
+	}
+
+}
+
+function draw_obj(id,ctx,wh,hh)
+{
+	//ワイヤーオブジェクトの描画
+	
+	if(g_sprite[id].v)
+	{
+		var sp = g_sprite[id];
+		var tg = (id + 16) % g_sprite_num;
+		var a  = sp.z / 512;
+		var ox = sp.x / a + wh;
+		var oy = sp.y / a + hh;
+		
+		//縦線(Z方向)のラインを描画
+		if(g_sprite[tg].v)
+		{
+			var tsp = g_sprite[tg];
+			var tx  = tsp.x;
+			var ty  = tsp.y;
+			var tz  = tsp.z;
+			var b   = tz / 512;
+			
+			ctx.moveTo(ox,oy);
+			ctx.lineTo(tx / b + wh,ty / b + hh);
+		}
+
+		//横線(X/Y方向)のラインを描画
+		if((id & 15) != 15)
+		{
+			var st   = id + 1;
+			var stsp = g_sprite[st];
+			var sx   = stsp.x;
+			var sy   = stsp.y;
+			var sz   = stsp.z;
+			var c    = sz / 512;
+			
+			ctx.moveTo(ox,oy);
+			ctx.lineTo(sx / c + wh,sy / c + hh);
+		}
+
+		//手前に来て見えなくなったら非表示にする
+		var z = sp.z - 8;
+		sp.z  = z;
+		if(z <= 0)
+		{	
+			sp.v = 0;
+		}
+	}
+	
+}
+
+function draw_wire()
+{
+	//ワイヤーフレームっぽいもの描画処理	
+	var screen  = document.getElementById("game-screen");	//描画先canvas
+
+	//毎ターンの画面クリア
+	var ctx = screen.getContext("2d");
+	ctx.clearRect(0,0,screen.width,screen.height);
+	
+	//オブジェクトの新しい位置を設定
+	set_obj_pos();
+	
+	//ワイヤーの色を決める
+	ctx.strokeStyle = 'lime';
+	
+	//ワイヤーオブジェクトの描画
+	var wh = g_game_width  / 2;
+	var hh = g_game_height / 2;
+	ctx.beginPath();
+	for(var i = 0;i < g_sprite_num;++i)
+	{
+		draw_obj(i,ctx,wh,hh);
+	}
+	ctx.stroke();
+	
+	//次へ
+	g_cnt++;
+	if(!rnd(16))
+	{
+		g_r1 = -g_r1;
+	}
+
+}
+
+function render_game()
+{
+	
+	//ゲームの描画処理
+	
+	//ワイヤーフレームっぽいものの描画
+	draw_wire();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render_game);
+
+}
+
+</script>
+</head>
+<body onload="init_game()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+</body>
+</html>
