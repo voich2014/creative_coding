@@ -1,0 +1,491 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<title>パパのAA Train</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, user-scalable=no, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache">
+<!--
+	このデモは、neko800(@nekohachi1)さんが公開されたプチコン作品をベースに
+	凸撃兵(@Stosstruppe)さんがJavaScriptで移植を始められたのに刺激を受けて
+	ぼいち(@voich2014)が自分でも作ってみました。
+	
+	すばらしい作品を公開してくださったオリジナルの方々に圧倒的感謝を！！
+	
+	neko800さんのAA TRAIN https://twitter.com/nekohachi1/status/1197642791079182337
+	凸撃兵さんのAA TRAIN  http://www.maroon.dti.ne.jp/lance/js/trial/aatrain5.html
+
+-->
+<style type="text/css">
+<!--
+	html
+	{
+	    overflow: hidden;
+	}
+
+	body
+	{
+		overflow: hidden;
+		background-color: black;
+		color: #fff;
+	}
+
+	*
+	{
+		-webkit-user-select: none;
+		   -moz-user-select: none;
+		    -ms-user-select: none;
+		        user-select: none;
+	}
+
+	#fps
+	{
+		position:absolute;
+		color: #FFF;
+		bottom:0px;
+		z-index: 100;
+	}
+
+	#game-screen 
+	{
+		position:absolute;
+	}
+
+	#aa-chip
+	{
+		display: none;
+	}
+
+	#aa-star
+	{
+		display: none;
+	}
+-->
+</style>
+<script type="text/javascript">
+
+//グローバルオブジェクト
+var g_game_width             = 320;
+var g_game_height            = 500;
+
+//スプライトモデルの種類
+//
+// 0:線路
+// 1:草１
+// 2:草２
+// 3:看板
+// 4:木
+// 5:ポール
+//
+
+const g_model_0 = "/====\\";
+
+const g_model_1 = ".ww.w.";
+
+const g_model_2 = "..www.";
+
+const g_model_3 = "#==#\n"+
+                  "#--#\n"+
+                  "#  #";
+
+const g_model_4 = "    %%     \n"+
+                  "   %%.%    \n"+
+                  "  %%**%    \n"+
+                  "  %%%% %   \n"+
+                  " %%** .%   \n"+
+                  " %%% %% %  \n"+
+                  "%%%* *..   \n"+
+                  "%%%  %%.%* \n"+
+                  " *%%..**.' \n"+
+                  " ''*# .''  \n"+
+                  "    # .    \n"+
+                  ".._## ##_..";
+
+const g_model_5 = "|X|\n"+
+                  "===\n"+
+                  "===\n"+
+                  "|X|\n"+
+                  "|X|\n"+
+                  "|X|\n"+
+                  "|X|\n"+
+                  "|X|\n"+
+                  "|#|\n"+
+                  "|#|\n"+
+                  "|X|\n"+
+                  "|X|";
+
+const g_sprite_num  = 512*3;	//全スプライト数(線路+左側+右側)
+const g_line_num    = 512;		//線路の数
+const g_obj_offset  = 64;		//線路の移動幅
+
+var g_model         = [];
+var g_sprite        = [];
+var g_pos_tg        = 0;
+var g_pos_x         = 0;
+var g_pos_z         = 0;
+var g_pos_a         = 0;
+var g_pos_aa        = 0;
+
+var g_last_fps_time = 0;
+var g_fps_count     = 0;
+
+function rad(deg)
+{
+	//度→ラジアン変換
+	return deg * Math.PI / 180;
+}
+
+function rnd(x)
+{
+	//乱数取得
+	return Math.floor(Math.random() * x);
+}
+
+function init_game()
+{
+	
+	//ゲームの初期化処理
+	
+	//画面調整
+	adjust_screen();
+	
+	//ゲームに必要なオブジェクトの生成
+	create_obj();
+	for(var i = 0;i < g_line_num;++i)
+	{	set_obj_pos();	}
+
+	//requestAnimationFrameの準備(各種ブラウザ対応)
+	var requestAnimationFrame = window.requestAnimationFrame       ||
+                                window.mozRequestAnimationFrame    ||
+                                window.webkitRequestAnimationFrame ||
+                                window.msRequestAnimationFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+    
+	//描画を登録
+	window.requestAnimationFrame(render_game);
+	
+}
+
+function draw_fps()
+{
+	
+	//FPS計測
+	
+	//現在時刻を取得
+	var now_time = Date.now();
+	
+	if((now_time - g_last_fps_time) >= 1000)
+	{
+		//FPS表示
+		var fps_div = document.getElementById("fps");
+		fps_div.innerText = "FPS:"+(g_fps_count*(1000/(now_time - g_last_fps_time)));
+		
+		g_last_fps_time = now_time;
+		g_fps_count     = 0;
+	}
+	g_fps_count++;
+
+}
+
+function adjust_screen()
+{
+	//画面調整
+	
+	//ウインドウのサイズを取得
+	var window_w = window.innerWidth;
+	var window_h = window.innerHeight;
+	
+	//ウインドウ幅が十分に広い場合はPCだとして
+	//画面サイズを変更する
+	if((g_game_width * 2) <= window_w)
+	{
+		g_game_width  = 1280;
+		g_game_height = 720;
+	}
+	
+	//ゲームスクリーンを中央に配置
+	var screen  = document.getElementById("game-screen");
+	var game_x  = (window_w - g_game_width) / 2;
+	var game_y  = (window_h - g_game_height) / 2;
+
+	screen.style.left = game_x+"px";
+	screen.style.top  = game_y+"px";
+	screen.width      = g_game_width;
+	screen.height     = g_game_height;
+
+}
+
+function create_obj()
+{
+	//オブジェクトの生成
+	
+	//スプライトのチップを準備
+	var aa_chip = document.getElementById("aa-chip");
+	var ctx_aa  = aa_chip.getContext("2d");
+	var sp,lines;
+	
+	aa_chip.width  = 320;
+	aa_chip.height = 240;
+	
+	ctx_aa.font         = "16px 'Courier New'";
+	//ctx_aa.strokeStyle  = '#0F0';	
+	//↑コメント外して、aa-chipのcssを消したら
+	//  貼り付け具合が見えるようになるよ
+  	ctx_aa.textBaseline = "top";
+   	
+  	//モデルの貼り付け場所定義
+	g_model[0] = { x:  0, y:  0, w: 58, h: 16 };
+	g_model[1] = { x:  0, y: 16, w: 58, h: 16 };
+	g_model[2] = { x:  0, y: 32, w: 58, h: 16 };
+	g_model[3] = { x:  0, y: 48, w: 39, h: 48 };
+	g_model[4] = { x: 60, y:  0, w:106, h:192 };
+	g_model[5] = { x:180, y:  0, w: 29, h:192 };
+	
+	sp = g_model[0];
+	ctx_aa.strokeRect(sp.x,sp.y,sp.w,sp.h);
+	ctx_aa.fillStyle = '#FFF';
+	ctx_aa.fillText(g_model_0,sp.x,sp.y);
+	
+	sp = g_model[1];
+	ctx_aa.strokeRect(sp.x,sp.y,sp.w,sp.h);
+	ctx_aa.fillStyle = '#0F0';
+	ctx_aa.fillText(g_model_1,sp.x,sp.y);
+	
+	sp = g_model[2];
+	ctx_aa.strokeRect(sp.x,sp.y,sp.w,sp.h);
+	ctx_aa.fillStyle = '#0F0';
+	ctx_aa.fillText(g_model_2,sp.x,sp.y);
+	
+	sp = g_model[3];
+	ctx_aa.strokeRect(sp.x,sp.y,sp.w,sp.h);
+	ctx_aa.fillStyle = '#FF0';
+	lines = g_model_3.split(/\n/);
+	for(var i = 0;i < lines.length;i++)
+	{	ctx_aa.fillText(lines[i],sp.x,sp.y+16*i);	}
+	
+	sp = g_model[4];
+	ctx_aa.strokeRect(sp.x,sp.y,sp.w,sp.h);
+	ctx_aa.fillStyle = '#FFF';
+	lines = g_model_4.split(/\n/);
+	for(var i = 0;i < lines.length;i++)
+	{	ctx_aa.fillText(lines[i],sp.x,sp.y+16*i);	}
+	
+	sp = g_model[5];
+	ctx_aa.strokeRect(sp.x,sp.y,sp.w,sp.h);
+	ctx_aa.fillStyle = '#FFF';
+	lines = g_model_5.split(/\n/);
+	for(var i = 0;i < lines.length;i++)
+	{	ctx_aa.fillText(lines[i],sp.x,sp.y+16*i);	}
+
+	
+	//背景の星空を準備
+	var screen  = document.getElementById("game-screen");
+	var aa_star = document.getElementById("aa-star");
+	var ctx_s   = aa_star.getContext("2d");
+	
+	aa_star.width  = screen.width;
+	aa_star.height = screen.height;
+	
+	ctx_s.font         = "16px 'Courier New'";
+	ctx_s.textBaseline = "top";
+  	ctx_s.fillStyle    = "#FFF";
+	for(var i = 0;i < 64;++i)
+	{	ctx_s.fillText("*."[rnd(2)],rnd(160)*8,rnd(24)*8);	}
+
+
+	//スプライトオブジェクト情報の初期化
+	for(var i = 0;i < g_sprite_num;++i)
+	{
+		var obj = { x: 0, y: 0, z: 0, a: 0, m: 0, v: 1 };
+		g_sprite.push(obj);
+	}
+
+}
+
+function set_obj_pos()
+{
+	//オブジェクトの位置を決定する
+	
+	if((g_pos_tg % 32) == 0)
+	{	g_pos_aa = rnd(3) - 1;	}
+	g_pos_a = (g_pos_a + g_pos_aa + 360) % 360;
+	
+	//Z方向に移動しつつ、X方向にゆれる
+	//
+	// Z
+	// ^
+	// |-----+
+	// |    /
+	// |θ/  
+	// |/  
+	// +------> X
+	// 
+	//
+	var a = rad(g_pos_a);
+	g_pos_x += Math.sin(a) * g_obj_offset;
+	g_pos_z += Math.cos(a) * g_obj_offset;
+
+	//線路スプライトの位置を設定
+	g_sprite[g_pos_tg].x = g_pos_x;
+	g_sprite[g_pos_tg].z = g_pos_z;
+	g_sprite[g_pos_tg].a = g_pos_a;	//線路の向いてる方向[deg]
+	g_sprite[g_pos_tg].m = 0;
+	g_sprite[g_pos_tg].v = ((g_pos_tg % 8) == 0) ? 1 : 0;
+	
+	
+	//線路の左右に配置するスプライトを設定
+	var side_a = rad(g_pos_a + 90);
+	var id     = g_pos_tg;
+	for(var s = 0;s < 2;++s)
+	{
+		id += g_line_num;
+		var m = 0;
+		var d = 0;
+		
+		if((id % 8) == 0)
+		{
+			//看板か木
+			switch(rnd(3))
+			{
+				case 1:	//木
+					d = rnd(16) * 64 + 512;
+					m = 4;
+					break;
+					
+				case 2: //看板
+					d = 240;
+					m = 3;
+					break;
+			}
+		}
+		if((id % 64) == 0)
+		{
+			//ポール
+			d = 420;
+			m = 5;
+		}
+		if(m == 0)
+		{
+			//草
+			d = rnd(8) * 128 + 256;
+			m = rnd(2) + 1;
+		}
+		
+		d = (s == 0) ? -d: d;
+		g_sprite[id].x = g_pos_x + d * Math.sin(side_a);
+		g_sprite[id].z = g_pos_z + d * Math.cos(side_a);
+		g_sprite[id].a = 0;
+		g_sprite[id].m = m;
+		g_sprite[id].v = 1;
+	}
+	
+	g_pos_tg = (g_pos_tg + 1) % g_line_num;
+	
+}
+
+function draw_train()
+{
+	//AA Trainの描画処理	
+	var screen  = document.getElementById("game-screen");	//描画先canvas
+	var aa_chip = document.getElementById("aa-chip");		//スプライト用canvas
+	var aa_star = document.getElementById("aa-star");		//星空用canvas
+
+	//毎ターンの画面クリア
+	var ctx = screen.getContext("2d");
+	ctx.clearRect(0,0,screen.width,screen.height);
+	
+	//オブジェクトの新しい位置を設定
+	set_obj_pos();
+	
+	//線路に沿ってカメラ位置を設定
+	var cp     = (g_pos_tg + 16) % g_line_num;
+	var cx     = g_sprite[cp].x;
+	var cy     = 150;	//ちょっと上から眺める
+	var cz     = g_sprite[cp].z;
+	var ca     = rad(g_sprite[cp].a);
+	var ca_sin = Math.sin(ca);
+	var ca_cos = Math.cos(ca)
+	
+	var nZ     = 100;				//nearZ
+	var fZ     = 8000;				//farZ
+	var va     = rad(110);			//視野角
+	var va_tan = Math.tan(va*0.5);
+	
+	var sc_w  = screen.width;
+	var sc_h  = screen.height;
+	var sc_w2 = sc_w / 2;
+	var sc_h2 = sc_h / 2;
+	var ar    = sc_h / sc_w;		//スクリーン幅を高さと1:1にするための係数
+	
+	//星空を移動
+	var bx = Math.floor(aa_star.width * g_sprite[cp].a / 360);
+	ctx.drawImage(aa_star,-bx,0);
+	ctx.drawImage(aa_star,aa_star.width-bx,0);
+	
+	//全オブジェクトの位置をカメラに合わせて変換
+	for(var i = 0;i < g_sprite_num;++i)
+	{
+		if(g_sprite[i].v)
+		{
+			//カメラ位置に合わせて平行移動と回転
+			
+			//平行移動
+			var mx = g_sprite[i].x - cx;
+			var my = g_sprite[i].y - cy;
+			var mz = g_sprite[i].z - cz;
+			
+			//Y軸を中心に回転
+			var rx = mx * ca_cos - mz * ca_sin;
+			var ry = my;
+			var rz = mx * ca_sin + mz * ca_cos;
+			
+			if((nZ <= rz) && (rz < fZ))
+			{	
+				//視野角に対してrzの位置での見える
+				//範囲の最大を1として正規化する
+				var nd = va_tan * rz;
+				var nx = (rx * ar) / nd;
+				var ny = ry / nd;
+				
+				//ここでcanvasのスクリーン座標系に変換
+				var md    = g_model[g_sprite[i].m];
+				var scale = sc_h / nd;
+				var sw    = md.w * scale;
+				var sh    = md.h * scale;
+				var sx    = sc_w2 + (sc_w2 * nx) - (sw / 2);
+				var sy    = sc_h2 - (sc_h2 * ny) - sh;
+				
+				if((0 <= sx) && (sx < sc_w) &&
+				   (0 <= sy) && (sy < sc_h))
+				{	ctx.drawImage(aa_chip,md.x,md.y,md.w,md.h,sx,sy,sw,sh);	}
+			}
+		}
+	}
+
+}
+
+function render_game()
+{
+	
+	//ゲームの描画処理
+	
+	//AA TRAIN描画
+	draw_train();
+	
+	//FPS描画
+	draw_fps();
+	
+	//次の描画呼び出しを登録
+	window.requestAnimationFrame(render_game);
+
+}
+
+</script>
+</head>
+<body onload="init_game()">
+	<div id="fps"></div>
+	<canvas id="game-screen"></canvas>
+	<canvas id="aa-chip"></canvas>
+	<canvas id="aa-star"></canvas>
+</body>
+</html>

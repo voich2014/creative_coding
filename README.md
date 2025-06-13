@@ -90,6 +90,7 @@ creative_coding/
  - 047.`noise`：[パパのノイズ練習１](https://voich2014.github.io/creative_coding/src/noise/index1.html)
  - 048.`noise2`：[パパのノイズ練習２](https://voich2014.github.io/creative_coding/src/noise/index2.html)
  - 049.`wire`：[パパのワイヤーフレームっぽいの](https://voich2014.github.io/creative_coding/src/wire/index3.html)
+ - 050.`train`：[パパのAA Train](https://voich2014.github.io/creative_coding/src/train/index1.html)
 
 ---
 
