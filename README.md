@@ -91,6 +91,7 @@ creative_coding/
  - 048.`noise2`：[パパのノイズ練習２](https://voich2014.github.io/creative_coding/src/noise/index2.html)
  - 049.`wire`：[パパのワイヤーフレームっぽいの](https://voich2014.github.io/creative_coding/src/wire/index3.html)
  - 050.`train`：[パパのAA Train](https://voich2014.github.io/creative_coding/src/train/index1.html)
+ - 051.`mzabyss`：[パパのリアルタイムマンデルブロ深層ズーム](https://voich2014.github.io/mandel_zoom_abyss/src/)
 
 ---
 
@@ -111,3 +112,5 @@ creative_coding/
 - X（旧Twitter）：[@voich2014](https://twitter.com/voich2014)  
 - Bluesky：[@voich2014.bsky.social](https://bsky.app/profile/voich2014.bsky.social)  
 - YouTube：[voichannel](https://www.youtube.com/@voichannel)
+- BOOTH：[ぼいちWORKS](https://voichworks.booth.pm/)
+
